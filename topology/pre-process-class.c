@@ -44,6 +44,42 @@ static struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, 
 	return NULL;
 }
 
+static int tplg_parse_class_attribute(struct tplg_pre_processor *tplg_pp ATTRIBUTE_UNUSED,
+				      snd_config_t *cfg, struct tplg_attribute *attr)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/*
+		 * Parse token reference for class attributes/arguments. The token_ref field
+		 * stores the name of SectionVendorTokens and type that will be used to build
+		 * the tuple value for the attribute. For ex: "sof_tkn_dai.word" refers to the
+		 * SectionVendorTokens with the name "sof_tkn_dai" and "word" refers to the
+		 * tuple types.
+		 */
+		if (!strcmp(id, "token_ref")) {
+			const char *s;
+
+			if (snd_config_get_string(n, &s) < 0) {
+				SNDERR("invalid token_ref for attribute %s\n", attr->name);
+				return -EINVAL;
+			}
+
+			snd_strlcpy(attr->token_ref, s, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			continue;
+		}
+	}
+
+	return 0;
+}
+
 /* Parse class attributes/arguments and add to class attribute_list */
 static int tplg_parse_class_attributes(struct tplg_pre_processor *tplg_pp,
 				       snd_config_t *cfg, struct tplg_class *class, int type)
@@ -51,6 +87,7 @@ static int tplg_parse_class_attributes(struct tplg_pre_processor *tplg_pp,
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	const char *id;
+	int ret;
 
 	snd_config_for_each(i, next, cfg) {
 		struct tplg_attribute *attr;
@@ -70,6 +107,11 @@ static int tplg_parse_class_attributes(struct tplg_pre_processor *tplg_pp,
 
 		/* set attribute name */
 		snd_strlcpy(attr->name, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+
+		ret = tplg_parse_class_attribute(tplg_pp, n, attr);
+		if (ret < 0)
+			return ret;
 
 		/* add to class attribute list */
 		list_add_tail(&attr->list, &class->attribute_list);
@@ -132,7 +174,6 @@ static int tplg_define_class(struct tplg_pre_processor *tplg_pp, snd_config_t *c
 				return ret;
 			}
 		}
-
 	}
 
 	tplg_pp_debug("Created class: '%s'\n", class->name);
