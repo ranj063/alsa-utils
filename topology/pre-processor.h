@@ -82,6 +82,7 @@ struct tplg_class {
 	int num_args;
 	struct list_head attribute_list; /* list of attributes */
 	struct list_head list; /* item in class list */
+	struct list_head object_list; /* list of child objects */
 	int type;
 };
 
