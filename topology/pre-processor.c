@@ -149,6 +149,9 @@ void free_objects(struct list_head *list)
 
 	list_for_each_entry_safe(object, _object, list, list) {
 		free_attributes(&object->attribute_list);
+
+		/* free the child objects */
+		free_objects(&object->object_list);
 		free(object);
 	}
 }
