@@ -46,6 +46,67 @@ struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, const c
 	return NULL;
 }
 
+static int tplg_create_class_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,
+				    struct list_head *list, struct tplg_class *class)
+{
+	snd_config_iterator_t i, next;
+	struct tplg_object *object;
+	snd_config_t *n;
+	const char *id;
+
+	snd_config_for_each(i, next, cfg) {
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/* create object */
+		object = tplg_create_object(tplg_pp, n, class, NULL, list);
+		if (!object) {
+			SNDERR("Failed to create object for class %s\n", class->name);
+			return -EINVAL;;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * Class definition can have pre-defined objects, for ex: a PGA widget can have a mixer object.
+ * Parse and create these objects and add them to the class object_list.
+ */
+static int tplg_create_class_objects(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,
+				     struct list_head *list)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+	int ret;
+
+	snd_config_for_each(i, next, cfg) {
+		struct tplg_class *class;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		class = tplg_class_lookup(tplg_pp, id);
+		if (!class) {
+			SNDERR("No class definition found for object %s\n", id);
+			return -EINVAL;
+		}
+
+		/* create object */
+		ret = tplg_create_class_object(tplg_pp, n, list, class);
+		if (ret < 0) {
+			SNDERR("Failed to create object for class %s\n", class->name);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 /* check if mandatory and immutable attributes have been provided a value */
 static bool tplg_class_attribute_sanity_check(struct tplg_class *class)
 {
@@ -631,6 +692,7 @@ static int tplg_define_class(struct tplg_pre_processor *tplg_pp, snd_config_t *c
 
 	snd_strlcpy(class->name, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	INIT_LIST_HEAD(&class->attribute_list);
+	INIT_LIST_HEAD(&class->object_list);
 	list_add(&class->list, &tplg_pp->class_list);
 
 	/* Parse the class definition */
@@ -667,6 +729,16 @@ static int tplg_define_class(struct tplg_pre_processor *tplg_pp, snd_config_t *c
 			if (ret < 0) {
 				SNDERR("failed to parse attributes for class %s\n", class->name);
 				return ret;
+			}
+			continue;
+		}
+
+		/* parse objects */
+		if (!strcmp(id, "Object")) {
+			ret = tplg_create_class_objects(tplg_pp, n, &class->object_list);
+			if (ret < 0) {
+				SNDERR("Cannot create objects for class %s\n", class->name);
+				return -EINVAL;
 			}
 			continue;
 		}

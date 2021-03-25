@@ -168,6 +168,9 @@ void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp)
 
 	list_for_each_entry_safe(class, _class, &tplg_pp->class_list, list) {
 		free_attributes(&class->attribute_list);
+
+		/* free the chid objects in the class */
+		free_objects(&class->object_list);
 		free(class);
 	}
 
