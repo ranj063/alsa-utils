@@ -168,12 +168,98 @@ static int tplg_copy_attribute(struct tplg_attribute *attr, struct tplg_attribut
 	return 0;
 }
 
+/* create the child object */
+static int tplg_create_child_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,
+				    struct tplg_object *parent, struct list_head *list,
+				    struct tplg_class *class)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+
+	snd_config_for_each(i, next, cfg) {
+		struct tplg_object *object;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		object = tplg_create_object(tplg_pp, n, class, parent, list);
+		if (!object) {
+			SNDERR("Error creating child %s for parent %s\n", id, parent->name);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+/* create all child objects of the same class */
+int tplg_create_child_objects_type(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,
+				   struct tplg_object *parent, struct list_head *list)
+{
+	snd_config_iterator_t i, next;
+	struct tplg_class *class;
+	snd_config_t *n;
+	const char *id;
+	int ret;
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/* check if it is a valid object */
+		class = tplg_class_lookup(tplg_pp, id);
+		if (!class)
+			continue;
+
+		ret = tplg_create_child_object(tplg_pp, n, parent, list, class);
+		if (ret < 0) {
+			SNDERR("Error creating %s type child object for parent %s\n",
+			       class->name, parent->name);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+/* create child objects that are part of the parent object instance */
+static int tplg_create_child_objects(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,
+				     struct tplg_object *parent)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+	int ret;
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		if (strcmp(id, "Object"))
+			continue;
+
+		/* create object */
+		ret = tplg_create_child_objects_type(tplg_pp, n, parent, &parent->object_list);
+		if (ret < 0) {
+			SNDERR("Error creating child objects for %s\n", parent->name);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 /*
  * Create an object  by copying the attribute list, number of arguments, constraints and
  * default attribute values from the class definition.
  */
 struct tplg_object *
-tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct tplg_class *class)
+tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct tplg_class *class,
+		   struct tplg_object *parent, struct list_head *list)
 {
 	struct tplg_object *object;
 	struct list_head *pos;
@@ -181,8 +267,8 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 	char object_name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 	int ret;
 
-	if (!class) {
-		SNDERR("Invalid class elem for object\n");
+	if (!class ||  !list) {
+		SNDERR("Invalid class elem or parent list for object\n");
 		return NULL;
 	}
 
@@ -200,13 +286,15 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 		return NULL;
 	}
 
+	object->parent = parent;
 	object->cfg = cfg;
 	object->num_args = class->num_args;
 	snd_strlcpy(object->name, object_name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	snd_strlcpy(object->class_name, class->name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	object->type = class->type;
 	INIT_LIST_HEAD(&object->attribute_list);
-	list_add_tail(&object->list, &tplg_pp->object_list);
+	INIT_LIST_HEAD(&object->object_list);
+	list_add_tail(&object->list, list);
 
 	/* copy attributes from class */
 	list_for_each(pos, &class->attribute_list) {
@@ -235,6 +323,13 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 	if (ret < 0)
 		return NULL;
 
+	/* create child objects that are part of the object instance */
+	ret = tplg_create_child_objects(tplg_pp, cfg, object);
+	if (ret < 0) {
+		SNDERR("failed to create child objects for %s\n", object->name);
+		return NULL;
+	}
+
 	return object;
 }
 
@@ -257,7 +352,7 @@ int tplg_create_new_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg
 		 * Create object by duplicating the attributes and child objects from the class
 		 * definiion
 		 */
-		object = tplg_create_object(tplg_pp, n, class);
+		object = tplg_create_object(tplg_pp, n, class, NULL, &tplg_pp->object_list);
 		if (!object) {
 			SNDERR("Error creating object %s for class %s\n", id, class->name);
 			return -EINVAL;

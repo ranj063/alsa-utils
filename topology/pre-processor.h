@@ -90,6 +90,8 @@ struct tplg_object {
 	char class_name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 	int num_args;
 	struct list_head attribute_list;
+	struct list_head object_list;
+	struct tplg_object *parent;
 	snd_config_t *cfg;
 	int type;
 	struct list_head list; /* item in object list */
@@ -101,4 +103,7 @@ int tplg_define_classes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
 int tplg_create_objects(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
 struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, const char *name);
 int tplg_parse_attribute_value(snd_config_t *cfg, struct list_head *list, bool override);
+struct tplg_object *
+tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct tplg_class *class,
+		   struct tplg_object *parent, struct list_head *list);
 #endif
