@@ -33,6 +33,48 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/*
+ * Find the attribute with the mask TPLG_CLASS_ATTRIBUTE_MASK_UNIQUE and set its value and type.
+ * Only string or integer types are allowed for unique values.
+ */
+static int tplg_object_set_unique_attribute(struct tplg_object *object, snd_config_t *cfg)
+{
+	struct tplg_attribute *attr;
+	struct list_head *pos;
+	const char *id;
+	bool found = false;
+
+	list_for_each(pos, &object->attribute_list) {
+		attr = list_entry(pos, struct tplg_attribute, list);
+
+		if (attr->constraint.mask & TPLG_CLASS_ATTRIBUTE_MASK_UNIQUE) {
+			found = true;
+			break;
+		}
+	}
+
+	/* no unique attribute for object */
+	if (!found) {
+		SNDERR("No unique attribute set for object %s\n", object->name);
+		return -EINVAL;
+	}
+
+	/* no need to check return value as it is already checked in tplg_create_object() */
+	snd_config_get_id(cfg, &id);
+
+	if (id[0] >= '0' && id[0] <= '9') {
+		attr->value.integer = atoi(id);
+		attr->type = SND_CONFIG_TYPE_INTEGER;
+	} else {
+		snd_strlcpy(attr->value.string, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+		attr->type = SND_CONFIG_TYPE_STRING;
+	}
+
+	attr->found = true;
+
+	return 0;
+}
+
 /* copy the class attribute values and constraints */
 static int tplg_copy_attribute(struct tplg_attribute *attr, struct tplg_attribute *ref_attr)
 {
@@ -142,6 +184,11 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 		}
 		list_add_tail(&new_attr->list, &object->attribute_list);
 	}
+
+	/* set unique attribute for object */
+	ret = tplg_object_set_unique_attribute(object, cfg);
+	if (ret < 0)
+		return NULL;
 
 	return object;
 }
