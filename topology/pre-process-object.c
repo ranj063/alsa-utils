@@ -33,6 +33,46 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/* Process the attribute values provided during object instantiation */
+static int tplg_process_attributes(snd_config_t *cfg, struct tplg_object *object)
+{
+	snd_config_iterator_t i, next;
+	struct list_head *pos;
+	snd_config_t *n;
+	const char *id;
+	int ret;
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		list_for_each(pos, &object->attribute_list) {
+			struct tplg_attribute *attr = list_entry(pos, struct tplg_attribute, list);
+
+			/* copy new value set in the object instance */
+			if (!strcmp(id, attr->name)) {
+				/* cannot update immutable attributes */
+				if (attr->constraint.mask & TPLG_CLASS_ATTRIBUTE_MASK_IMMUTABLE) {
+					SNDERR("Can't update immutable attribute '%s' in object '%s'\n",
+					       attr->name, object->name);
+					return -EINVAL;
+				}
+
+				ret = tplg_parse_attribute_value(n, &object->attribute_list, true);
+				if (ret < 0) {
+					SNDERR("Error: %d parsing attribute '%s' for object '%s'\n",
+					       ret, attr->name, object->name);
+					return ret;
+				}
+				break;
+			}
+		}
+	}
+
+	return 0;
+}
+
 /*
  * Find the attribute with the mask TPLG_CLASS_ATTRIBUTE_MASK_UNIQUE and set its value and type.
  * Only string or integer types are allowed for unique values.
@@ -187,6 +227,11 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 
 	/* set unique attribute for object */
 	ret = tplg_object_set_unique_attribute(object, cfg);
+	if (ret < 0)
+		return NULL;
+
+	/* process object attribute values */
+	ret = tplg_process_attributes(cfg, object);
 	if (ret < 0)
 		return NULL;
 

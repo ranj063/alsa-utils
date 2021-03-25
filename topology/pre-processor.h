@@ -100,4 +100,5 @@ void tplg_pp_debug(char *fmt, ...);
 int tplg_define_classes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
 int tplg_create_objects(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
 struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, const char *name);
+int tplg_parse_attribute_value(snd_config_t *cfg, struct list_head *list, bool override);
 #endif
