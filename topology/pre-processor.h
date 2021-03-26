@@ -18,6 +18,7 @@
 #define __PRE_PROCESSOR_H
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <sound/asound.h>
 #include "topology.h"
@@ -61,6 +62,8 @@ struct tplg_attribute {
 	struct list_head list; /* item in class attribute list */
 	char token_ref[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 	struct attribute_constraint constraint;
+	bool found;
+	snd_config_t *cfg;
 	union {
 		long integer;
 		long long integer64;
