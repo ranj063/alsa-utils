@@ -33,6 +33,70 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+static int tplg_copy_attribute(struct tplg_attribute *attr, struct tplg_attribute *ref_attr);
+
+static int tplg_get_object_attribute_set(struct tplg_object *object,
+					 struct tplg_attribute_set **out,
+					 const char *token_ref)
+{
+	struct tplg_attribute_set *set;
+
+	/* return set if found */
+	list_for_each_entry(set, &object->attribute_set_list, list)
+		if (!strcmp(set->token_ref, token_ref)) {
+			*out = set;
+			return 0;
+		}
+
+	/* else create a new set and add it to the object's attribute_set_list */
+	set = calloc(1, sizeof(struct tplg_attribute_set));
+	if (!set)
+		return -ENOMEM;
+
+	snd_strlcpy(set->token_ref, token_ref, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	INIT_LIST_HEAD(&set->attribute_list);
+	list_add_tail(&set->list, &object->attribute_set_list);
+	*out = set;
+	return 0;
+}
+
+/* Build attribute sets to add SectionVendorTuples */
+int tplg_build_object_attribute_sets(struct tplg_object *object)
+{
+	struct tplg_attribute *attr;
+	int ret;
+
+	list_for_each_entry(attr, &object->attribute_list, list) {
+		struct tplg_attribute *new_attr;
+		struct tplg_attribute_set *set;
+
+		/* skip attributes that dont have a token_ref or value */
+		if (!strcmp(attr->token_ref, "") || !attr->found)
+			continue;
+
+		/* get attribute set if it exists already or create one */
+		ret = tplg_get_object_attribute_set(object, &set, attr->token_ref);
+		if (ret < 0) {
+			SNDERR("Can't create attribute set for '%s'\n", object->name);
+			return ret;
+		}
+
+		new_attr = calloc(1, sizeof(struct tplg_attribute));
+		if (!new_attr)
+			return -ENOMEM;
+
+		ret = tplg_copy_attribute(new_attr, attr);
+		if (ret < 0) {
+			SNDERR("Cannot add attribute to set for object %s\n", object->name);
+			return ret;
+		}
+
+		list_add(&new_attr->list, &set->attribute_list);
+	}
+
+	return 0;
+}
+
 static const struct build_function_map object_build_map[] = {
 	{SND_TPLG_CLASS_TYPE_BASE, "data", &tplg_build_data_object},
 	{SND_TPLG_CLASS_TYPE_BASE, "manifest", &tplg_build_manifest_object},
@@ -64,6 +128,11 @@ static int tplg_build_object(struct tplg_pre_processor *tplg_pp, struct tplg_obj
 	build_func builder;
 	int ret;
 
+	/* sort attributes with token references into separate sets */
+	ret = tplg_build_object_attribute_sets(object);
+	if (ret < 0)
+		SNDERR("Failed to build attribute sets for object %s\n", object->name);
+
 	builder = tplg_pp_lookup_object_build_func(object);
 	if (!builder) {
 		tplg_pp_debug("skipping build for %s\n", object->name);
@@ -87,7 +156,7 @@ child:
 		}
 	}
 
-	return 0;
+	return ret;
 }
 
 /*
@@ -628,6 +697,7 @@ static int tplg_copy_object(struct tplg_object *src, struct tplg_object *parent)
 	dest->parent = parent;
 	INIT_LIST_HEAD(&dest->attribute_list);
 	INIT_LIST_HEAD(&dest->object_list);
+	INIT_LIST_HEAD(&dest->attribute_set_list);
 	list_add_tail(&dest->list, &parent->object_list);
 
 	/* copy attributes from class child object */
@@ -804,6 +874,7 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 	object->type = class->type;
 	INIT_LIST_HEAD(&object->attribute_list);
 	INIT_LIST_HEAD(&object->object_list);
+	INIT_LIST_HEAD(&object->attribute_set_list);
 	list_add_tail(&object->list, list);
 
 	/* copy attributes from class */
