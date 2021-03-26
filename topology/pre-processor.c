@@ -116,9 +116,8 @@ static int pre_process_config(struct tplg_pre_processor *tplg_pp, snd_config_t *
 			continue;
 
 		parser = NULL;
-		if (!strcmp(id, "Class")) {
-			/* TODO: set object parser */
-		}
+		if (!strcmp(id, "Class"))
+			parser = &tplg_define_classes;
 
 		if (!strcmp(id, "Object")) {
 			/* TODO: set object parser */
@@ -136,14 +135,30 @@ static int pre_process_config(struct tplg_pre_processor *tplg_pp, snd_config_t *
 	return 0;
 }
 
+void free_attributes(struct list_head *list)
+{
+	struct tplg_attribute *attr, *_attr;
+
+	list_for_each_entry_safe(attr, _attr, list, list)
+		free(attr);
+}
+
 void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp)
 {
+	struct tplg_class *class, *_class;
+
+	list_for_each_entry_safe(class, _class, &tplg_pp->class_list, list) {
+		free_attributes(&class->attribute_list);
+		free(class);
+	}
+
 	snd_tplg_buf_free(&tplg_pp->buf);
 	free(tplg_pp);
 }
 
 void init_pre_precessor(struct tplg_pre_processor *tplg_pp)
 {
+	INIT_LIST_HEAD(&tplg_pp->class_list);
 	snd_tplg_buf_init(&tplg_pp->buf);
 }
 
