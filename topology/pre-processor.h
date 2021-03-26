@@ -24,6 +24,8 @@
 #include "topology.h"
 #include "../alsactl/list.h"
 
+#define DEBUG_MAX_LENGTH	256
+
 #define TPLG_CLASS_ATTRIBUTE_MASK_MANDATORY	1 << 1
 #define TPLG_CLASS_ATTRIBUTE_MASK_IMMUTABLE	1 << 2
 #define TPLG_CLASS_ATTRIBUTE_MASK_DEPRECATED	1 << 3
@@ -59,7 +61,7 @@ struct tplg_attribute {
 	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 	snd_config_type_t type;
 	enum tplg_class_param_type param_type;
-	struct list_head list; /* item in class attribute list */
+	struct list_head list; /* item in class/object attribute list */
 	char token_ref[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 	struct attribute_constraint constraint;
 	bool found;
@@ -83,9 +85,19 @@ struct tplg_class {
 	int type;
 };
 
-#define DEBUG_MAX_LENGTH	256
+struct tplg_object {
+	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	char class_name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	int num_args;
+	struct list_head attribute_list;
+	snd_config_t *cfg;
+	int type;
+	struct list_head list; /* item in object list */
+};
 
 void tplg_pp_debug(char *fmt, ...);
 void tplg_pp_config_debug(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
 int tplg_define_classes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
+int tplg_create_objects(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
+struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, const char *name);
 #endif
