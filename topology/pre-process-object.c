@@ -33,6 +33,121 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/* copy the class attribute values and constraints */
+static int tplg_copy_attribute(struct tplg_attribute *attr, struct tplg_attribute *ref_attr)
+{
+	struct tplg_attribute_ref *ref;
+
+	snd_strlcpy(attr->name, ref_attr->name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	snd_strlcpy(attr->token_ref, ref_attr->token_ref, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	attr->found = ref_attr->found;
+	attr->param_type = ref_attr->param_type;
+	attr->cfg = ref_attr->cfg;
+	attr->type = ref_attr->type;
+
+	/* copy value */
+	if (ref_attr->found) {
+		switch (ref_attr->type) {
+		case SND_CONFIG_TYPE_INTEGER:
+			attr->value.integer = ref_attr->value.integer;
+			break;
+		case SND_CONFIG_TYPE_INTEGER64:
+			attr->value.integer64 = ref_attr->value.integer64;
+			break;
+		case SND_CONFIG_TYPE_STRING:
+			snd_strlcpy(attr->value.string, ref_attr->value.string,
+				    SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			break;
+		case SND_CONFIG_TYPE_REAL:
+		{
+			attr->value.d = ref_attr->value.d;
+			break;
+		}
+		case SND_CONFIG_TYPE_COMPOUND:
+			break;
+		default:
+			SNDERR("Unsupported type %d for attribute %s\n", attr->type, attr->name);
+			return -EINVAL;
+		}
+	}
+
+	/* copy attribute constraints */
+	INIT_LIST_HEAD(&attr->constraint.value_list);
+	list_for_each_entry(ref, &ref_attr->constraint.value_list, list) {
+		struct tplg_attribute_ref *new_ref = calloc(1, sizeof(*new_ref));
+
+		memcpy(new_ref, ref, sizeof(*ref));
+		list_add(&new_ref->list, &attr->constraint.value_list);
+	}
+	attr->constraint.mask = ref_attr->constraint.mask;
+	attr->constraint.min = ref_attr->constraint.min;
+	attr->constraint.max = ref_attr->constraint.max;
+
+	return 0;
+}
+
+static int tplg_get_object_attribute_set(struct tplg_object *object,
+					 struct tplg_attribute_set **out,
+					 const char *token_ref)
+{
+	struct tplg_attribute_set *set;
+
+	/* return set if found */
+	list_for_each_entry(set, &object->attribute_set_list, list)
+		if (!strcmp(set->token_ref, token_ref)) {
+			*out = set;
+			return 0;
+		}
+
+	/* else create a new set and add it to the object's attribute_set_list */
+	set = calloc(1, sizeof(struct tplg_attribute_set));
+	if (!set)
+		return -ENOMEM;
+
+	snd_strlcpy(set->token_ref, token_ref, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	INIT_LIST_HEAD(&set->attribute_list);
+	list_add_tail(&set->list, &object->attribute_set_list);
+	*out = set;
+	return 0;
+}
+
+/* Build attribute sets to add SectionVendorTuples */
+int tplg_build_object_attribute_sets(struct tplg_object *object)
+{
+	struct tplg_attribute *attr;
+	int ret;
+
+	list_for_each_entry(attr, &object->attribute_list, list) {
+		struct tplg_attribute *new_attr;
+		struct tplg_attribute_set *set;
+
+		/* skip attributes that dont have a token_ref or value */
+		if (!strcmp(attr->token_ref, "") || !attr->found)
+			continue;
+
+		/* get attribute set if it exists already or create one */
+		ret = tplg_get_object_attribute_set(object, &set, attr->token_ref);
+		if (ret < 0) {
+			SNDERR("Can't create attribute set for '%s'\n", object->name);
+			return ret;
+		}
+
+		new_attr = calloc(1, sizeof(struct tplg_attribute));
+		if (!new_attr)
+			return -ENOMEM;
+
+		ret = tplg_copy_attribute(new_attr, attr);
+		if (ret < 0) {
+			SNDERR("Cannot add attribute to set for object %s\n", object->name);
+			return ret;
+		}
+
+		list_add(&new_attr->list, &set->attribute_list);
+	}
+
+	return 0;
+}
+
 /* Parse manifest object, create the "SectionManifest" and save it */
 static int tplg_build_manifest_object(struct tplg_pre_processor *tplg_pp,
 				      struct tplg_object *object)
@@ -183,6 +298,11 @@ static int tplg_build_object(struct tplg_pre_processor *tplg_pp, struct tplg_obj
 	build_func builder;
 	int ret;
 
+	/* sort attributes with token references into separate sets */
+	ret = tplg_build_object_attribute_sets(object);
+	if (ret < 0)
+		SNDERR("Failed to build attribute sets for object %s\n", object->name);
+
 	builder = tplg_pp_lookup_object_build_func(object);
 	if (!builder) {
 		tplg_pp_debug("skipping build for %s\n", object->name);
@@ -206,7 +326,7 @@ child:
 		}
 	}
 
-	return 0;
+	return ret;
 }
 
 /*
@@ -546,59 +666,6 @@ static int tplg_object_set_unique_attribute(struct tplg_object *object, snd_conf
 	return 0;
 }
 
-/* copy the class attribute values and constraints */
-static int tplg_copy_attribute(struct tplg_attribute *attr, struct tplg_attribute *ref_attr)
-{
-	struct tplg_attribute_ref *ref;
-
-	snd_strlcpy(attr->name, ref_attr->name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	snd_strlcpy(attr->token_ref, ref_attr->token_ref, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	attr->found = ref_attr->found;
-	attr->param_type = ref_attr->param_type;
-	attr->cfg = ref_attr->cfg;
-	attr->type = ref_attr->type;
-
-	/* copy value */
-	if (ref_attr->found) {
-		switch (ref_attr->type) {
-		case SND_CONFIG_TYPE_INTEGER:
-			attr->value.integer = ref_attr->value.integer;
-			break;
-		case SND_CONFIG_TYPE_INTEGER64:
-			attr->value.integer64 = ref_attr->value.integer64;
-			break;
-		case SND_CONFIG_TYPE_STRING:
-			snd_strlcpy(attr->value.string, ref_attr->value.string,
-				    SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			break;
-		case SND_CONFIG_TYPE_REAL:
-		{
-			attr->value.d = ref_attr->value.d;
-			break;
-		}
-		case SND_CONFIG_TYPE_COMPOUND:
-			break;
-		default:
-			SNDERR("Unsupported type %d for attribute %s\n", attr->type, attr->name);
-			return -EINVAL;
-		}
-	}
-
-	/* copy attribute constraints */
-	INIT_LIST_HEAD(&attr->constraint.value_list);
-	list_for_each_entry(ref, &ref_attr->constraint.value_list, list) {
-		struct tplg_attribute_ref *new_ref = calloc(1, sizeof(*new_ref));
-
-		memcpy(new_ref, ref, sizeof(*ref));
-		list_add(&new_ref->list, &attr->constraint.value_list);
-	}
-	attr->constraint.mask = ref_attr->constraint.mask;
-	attr->constraint.min = ref_attr->constraint.min;
-	attr->constraint.max = ref_attr->constraint.max;
-
-	return 0;
-}
-
 /* create the child object */
 static int tplg_create_child_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,
 				    struct tplg_object *parent, struct list_head *list,
@@ -709,6 +776,7 @@ static int tplg_copy_object(struct tplg_object *src, struct tplg_object *parent)
 	dest->parent = parent;
 	INIT_LIST_HEAD(&dest->attribute_list);
 	INIT_LIST_HEAD(&dest->object_list);
+	INIT_LIST_HEAD(&dest->attribute_set_list);
 	list_add_tail(&dest->list, &parent->object_list);
 
 	/* copy attributes from class child object */
@@ -881,6 +949,7 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 	object->type = class->type;
 	INIT_LIST_HEAD(&object->attribute_list);
 	INIT_LIST_HEAD(&object->object_list);
+	INIT_LIST_HEAD(&object->attribute_set_list);
 	list_add_tail(&object->list, list);
 
 	/* copy attributes from class */

@@ -154,6 +154,13 @@ void free_objects(struct list_head *list)
 	struct tplg_object *object, *_object;
 
 	list_for_each_entry_safe(object, _object, list, list) {
+		struct tplg_attribute_set *attr_set, *_attr_set;
+
+		list_for_each_entry_safe(attr_set, _attr_set, &object->attribute_set_list, list) {
+			free_attributes(&attr_set->attribute_list);
+			free(attr_set);
+		}
+
 		free_attributes(&object->attribute_list);
 
 		/* free the child objects */

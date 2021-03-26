@@ -27,6 +27,13 @@
 #define DEBUG_MAX_LENGTH	256
 #define ARRAY_SIZE(a) (sizeof (a) / sizeof (a)[0])
 
+/* set of attributes that are part of the same SectionVendorTuples */
+struct tplg_attribute_set {
+	char token_ref[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	struct list_head list; /* item in object attribute_set_list */
+	struct list_head attribute_list; /* list of attributes */
+};
+
 struct map_elem {
         const char *name;
         int id;
@@ -107,6 +114,7 @@ struct tplg_object {
 	snd_config_t *cfg;
 	int type;
 	struct list_head list; /* item in object list */
+	struct list_head attribute_set_list; /* list of attribute sets */
 };
 
 typedef int (*build_func)(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
