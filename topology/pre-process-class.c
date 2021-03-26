@@ -34,7 +34,7 @@
 #include "topology.h"
 #include "pre-processor.h"
 
-static struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, const char *name)
+struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, const char *name)
 {
 	struct tplg_class *class;
 

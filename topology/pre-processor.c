@@ -119,9 +119,8 @@ static int pre_process_config(struct tplg_pre_processor *tplg_pp, snd_config_t *
 		if (!strcmp(id, "Class"))
 			parser = &tplg_define_classes;
 
-		if (!strcmp(id, "Object")) {
-			/* TODO: set object parser */
-		}
+		if (!strcmp(id, "Object"))
+			parser = &tplg_create_objects;
 
 		if (!parser)
 			continue;
@@ -150,6 +149,16 @@ void free_attributes(struct list_head *list)
 	}
 }
 
+void free_objects(struct list_head *list)
+{
+	struct tplg_object *object, *_object;
+
+	list_for_each_entry_safe(object, _object, list, list) {
+		free_attributes(&object->attribute_list);
+		free(object);
+	}
+}
+
 void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp)
 {
 	struct tplg_class *class, *_class;
@@ -159,6 +168,7 @@ void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp)
 		free(class);
 	}
 
+	free_objects(&tplg_pp->object_list);
 	snd_tplg_buf_free(&tplg_pp->buf);
 	free(tplg_pp);
 }
@@ -166,6 +176,7 @@ void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp)
 void init_pre_precessor(struct tplg_pre_processor *tplg_pp)
 {
 	INIT_LIST_HEAD(&tplg_pp->class_list);
+	INIT_LIST_HEAD(&tplg_pp->object_list);
 	snd_tplg_buf_init(&tplg_pp->buf);
 }
 

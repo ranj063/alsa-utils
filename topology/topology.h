@@ -24,6 +24,7 @@
 /* pre_processor */
 struct tplg_pre_processor {
 	struct list_head class_list;
+	struct list_head object_list;
 	struct snd_tplg_buf buf;
 	size_t dbg_print_len;
 };
