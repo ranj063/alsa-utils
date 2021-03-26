@@ -18,10 +18,43 @@
 #define __PRE_PROCESSOR_H
 
 #include <stdarg.h>
+#include <stdlib.h>
+#include <sound/asound.h>
 #include "topology.h"
+#include "../alsactl/list.h"
+
+enum tplg_class_param_type {
+	TPLG_CLASS_PARAM_TYPE_ARGUMENT,
+	TPLG_CLASS_PARAM_TYPE_ATTRIBUTE,
+};
+
+struct tplg_attribute {
+	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	snd_config_type_t type;
+	enum tplg_class_param_type param_type;
+	struct list_head list; /* item in class attribute list */
+	union {
+		long integer;
+		long long integer64;
+		double d;
+		char string[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	}value;
+};
+
+/* class types */
+#define SND_TPLG_CLASS_TYPE_BASE		0
+
+struct tplg_class {
+	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	int num_args;
+	struct list_head attribute_list; /* list of attributes */
+	struct list_head list; /* item in class list */
+	int type;
+};
 
 #define DEBUG_MAX_LENGTH	256
 
 void tplg_pp_debug(char *fmt, ...);
 void tplg_pp_config_debug(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
+int tplg_define_classes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
 #endif
