@@ -33,6 +33,97 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/*
+ * Set child object attribute by passing the class_name and unique attribute value.
+ * For example to set the mixer.0 name from a pga object,
+ * Object.pga {
+ * 	mixer.0.name	"Master Volume Control"
+ * }
+ * 
+ * or to set the channel name in the mixer:
+ * Object.pga {
+ * 	mixer.0.channel.0.name	"flw"
+ * }
+ */
+static int tplg_set_child_attributes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,
+				     struct tplg_object *base, struct tplg_object *current,
+				     const char *class_name, struct list_head *list)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	int ret;
+
+	snd_config_for_each(i, next, cfg) {
+		struct tplg_class *class;
+		snd_config_type_t type;
+		const char *id;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0) {
+			return -EINVAL;
+		}
+
+		type = snd_config_get_type(n);
+
+		/* set the attribute for the current object */
+		if (current) {
+			if (type != SND_CONFIG_TYPE_COMPOUND) {
+				ret = tplg_parse_attribute_value(n, &current->attribute_list,
+								 false);
+				if (ret < 0)
+					SNDERR("Failed to set attribute for '%s'\n", current->name);
+				return ret;
+			} else {
+				/* move to the next node and pass the current object list */
+				ret = tplg_set_child_attributes(tplg_pp, cfg, base, NULL, NULL,
+							&current->object_list);
+				if (ret < 0)
+					return ret;
+
+				continue;
+			}
+		}
+
+		/* look for the object in the list and pass it to the next node */
+		if (class_name) {
+			struct tplg_object *child;
+
+			/* get object of type class_name and unique attribute value */
+			child = tplg_object_lookup_in_list(list, class_name, (char *)id);
+			if (!child) {
+				SNDERR("No child %s.%s found for object %s\n",
+					class_name, id, base->name);
+				return -EINVAL;
+			}
+
+			/* move to the next node and pass the child object */
+			ret = tplg_set_child_attributes(tplg_pp, n, base, child, NULL, list);
+			if (ret < 0)
+				return ret;
+
+			continue;
+		}
+
+		/* look up class name and pass it to the next node*/
+		class = tplg_class_lookup(tplg_pp, id);
+		if (!class) {
+			/* skip all nodes that arent for setting child attributes */
+			if (!current) {
+				continue;
+			} else {
+				SNDERR("No class found with name '%s'\n", id);
+				return -ENOENT;
+			}
+		}
+
+		ret = tplg_set_child_attributes(tplg_pp, n, base, NULL, id, list);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 /* look up object based on class type and unique attribute value in a list */
 struct tplg_object *tplg_object_lookup_in_list(struct list_head *list, const char *class_name,
 					       char *input)
@@ -566,6 +657,13 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 	ret = tplg_process_child_objects(object);
 	if (ret < 0) {
 		SNDERR("failed to create child objects for %s\n", object->name);
+		return NULL;
+	}
+
+	/* set child object attributes from parent object */
+	ret = tplg_set_child_attributes(tplg_pp, cfg, object, NULL, NULL, &object->object_list);
+	if (ret < 0) {
+		SNDERR("failed to set child attributes for %s\n", object->name);
 		return NULL;
 	}
 
