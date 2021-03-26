@@ -33,6 +33,93 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/*
+ * Set child object attribute by passing the class_name and unique attribute value.
+ * For example to set the mixer.0 name from a pga object,
+ * Object.pga {
+ * 	mixer.0.name	"Master Volume Control"
+ * }
+ * 
+ * or to set the channel name in the mixer:
+ * Object.pga {
+ * 	mixer.0.channel.0.name	"flw"
+ * }
+ */
+static int tplg_set_child_attributes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,
+				     struct tplg_object *object)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	int ret;
+
+	snd_config_for_each(i, next, cfg) {
+		snd_config_iterator_t first, second;
+		snd_config_t *first_cfg, *second_cfg;
+		struct tplg_class *class;
+		struct tplg_object *child;
+		const char *class_name, *index_str, *attribute_name;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &class_name) < 0)
+			continue;
+
+		if (snd_config_get_type(n) != SND_CONFIG_TYPE_COMPOUND)
+	                continue;
+
+		/* check if it is a valid class name */
+		class = tplg_class_lookup(tplg_pp, class_name);
+		if (!class)
+			continue;
+
+		/* get index */
+		first = snd_config_iterator_first(n);
+		first_cfg = snd_config_iterator_entry(first);
+		if (snd_config_get_id(first_cfg, &index_str) < 0)
+			continue;
+
+		if (snd_config_get_type(first_cfg) != SND_CONFIG_TYPE_COMPOUND) {
+			SNDERR("No attribute name for child %s.%s\n", class_name, index_str);
+			return -EINVAL;
+		}
+
+		/* the next node can either be an attribute name or a child class */
+		second = snd_config_iterator_first(first_cfg);
+		second_cfg = snd_config_iterator_entry(second);
+		if (snd_config_get_id(second_cfg, &attribute_name) < 0)
+			continue;
+
+		/* get object of type class_name and unique attribute value */
+		child = tplg_object_lookup_in_list(&object->object_list, class_name,
+						   (char *)index_str);
+		if (!child) {
+			SNDERR("No child %s.%s found for object %s\n",
+				class_name, index_str, object->name);
+			return -EINVAL;
+		}
+
+		/*
+		 * if the second conf node is an attribute name, set the value but do not
+		 * override the object value if already set.
+		 */
+		if (snd_config_get_type(second_cfg) != SND_CONFIG_TYPE_COMPOUND) {
+			ret = tplg_parse_attribute_value(second_cfg, &child->attribute_list, false);
+
+			if (ret < 0) {
+				SNDERR("Failed to set attribute for object %s\n", object->name);
+				return ret;
+			}
+			continue;
+		}
+
+		/* otherwise pass it down to the child object */
+		ret = tplg_set_child_attributes(tplg_pp, first_cfg, child);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 /* look up object based on class type and unique attribute value in a list */
 struct tplg_object *tplg_object_lookup_in_list(struct list_head *list, const char *class_name,
 					       char *input)
@@ -543,6 +630,13 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 	ret = tplg_process_child_objects(object);
 	if (ret < 0) {
 		SNDERR("failed to create child objects for %s\n", object->name);
+		return NULL;
+	}
+
+	/* set child object attributes from parent object */
+	ret = tplg_set_child_attributes(tplg_pp, cfg, object);
+	if (ret < 0) {
+		SNDERR("failed to set child attributes for %s\n", object->name);
 		return NULL;
 	}
 
