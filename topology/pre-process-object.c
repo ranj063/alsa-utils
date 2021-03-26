@@ -34,6 +34,128 @@
 #include "pre-processor.h"
 
 /*
+ * Child objects could have arguments inherited from the parent. Update the name now that the
+ * parent has been instantiated and values updated.
+ */
+static int tplg_update_object_name_from_args(struct tplg_object *object)
+{
+	struct list_head *pos;
+	char string[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	int ret;
+
+	snprintf(string, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s", object->class_name);
+
+	list_for_each(pos, &object->attribute_list) {
+		struct tplg_attribute *attr = list_entry(pos, struct tplg_attribute, list);
+		char new_str[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+
+		if (attr->param_type != TPLG_CLASS_PARAM_TYPE_ARGUMENT)
+			continue;
+
+		switch (attr->type) {
+		case SND_CONFIG_TYPE_INTEGER:
+			ret = snprintf(new_str, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s.%ld",
+				 string, attr->value.integer);
+			if (ret > SNDRV_CTL_ELEM_ID_NAME_MAXLEN) {
+				SNDERR("Object name too long for %s\n", object->name);
+				return -EINVAL;
+			}
+			snd_strlcpy(string, new_str, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			break;
+		case SND_CONFIG_TYPE_STRING:
+			ret = snprintf(new_str, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s.%s",
+				 string, attr->value.string);
+			if (ret > SNDRV_CTL_ELEM_ID_NAME_MAXLEN) {
+				SNDERR("Object name too long for %s\n", object->name);
+				return -EINVAL;
+			}
+			snd_strlcpy(string, new_str, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			break;
+		default:
+			break;
+		}
+	}
+
+	snd_strlcpy(object->name, string, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+	return 0;
+}
+
+/*
+ * Check if all mandatory attributes have been provided with a value and
+ * translate valid values to tuple values if needed.
+ */
+static int tplg_object_attributes_sanity_check(struct tplg_object *object)
+{
+	struct list_head *pos;
+	int ret;
+
+	/* sanity check for object attributes */
+	list_for_each(pos, &object->attribute_list) {
+		struct tplg_attribute *attr = list_entry(pos, struct tplg_attribute, list);
+
+		/* check if mandatory and value provided */
+		if (attr->constraint.mask & TPLG_CLASS_ATTRIBUTE_MASK_MANDATORY && !attr->found) {
+			SNDERR("Mandatory attribute %s not found for object %s\n", attr->name,
+			       object->name);
+			return -EINVAL;
+		}
+
+		if (attr->constraint.mask & TPLG_CLASS_ATTRIBUTE_MASK_DEPRECATED && attr->found) {
+			SNDERR("Attibrute %s decprecated\n", attr->name);
+			return -EINVAL;
+		}
+
+		/* translate string values to integer if needed to be added to private data */
+		switch (attr->type) {
+		case SND_CONFIG_TYPE_STRING:
+		{
+			struct list_head *pos1;
+
+			/* skip attributes with no pre-defined valid values */
+			if (list_empty(&attr->constraint.value_list))
+				continue;
+
+			/* Translate the string value to integer if needed */
+			list_for_each(pos1, &attr->constraint.value_list) {
+				struct tplg_attribute_ref *v;
+
+				v = list_entry(pos1, struct tplg_attribute_ref, list);
+
+				if (!strcmp(attr->value.string, v->string)) {
+					if (v->value != -EINVAL) {
+						attr->value.integer = v->value;
+						attr->type = SND_CONFIG_TYPE_INTEGER;
+					}
+					break;
+				}
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	/* set new object name */
+	ret = tplg_update_object_name_from_args(object);
+	if (ret < 0)
+		return ret;
+
+	/* recursively check all child objects */
+	list_for_each(pos, &object->object_list) {
+		struct tplg_object *child = list_entry(pos, struct tplg_object, list);
+		int ret;
+
+		ret = tplg_object_attributes_sanity_check(child);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+/*
  * Set child object attribute by passing the class_name and unique attribute value.
  * For example to set the mixer.0 name from a pga object,
  * Object.pga {
@@ -650,6 +772,7 @@ int tplg_create_new_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg
 	struct tplg_object *object;
 	snd_config_t *n;
 	const char *id;
+	int ret;
 
 	/* create all objects of the same class type */
 	snd_config_for_each(i, next, cfg) {
@@ -665,6 +788,16 @@ int tplg_create_new_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg
 		object = tplg_create_object(tplg_pp, n, class, NULL, &tplg_pp->object_list);
 		if (!object) {
 			SNDERR("Error creating object %s for class %s\n", id, class->name);
+			return -EINVAL;
+		}
+
+		/*
+		 * Check if all mandatory values are present and translate valid values to
+		 * tuple values.
+		 */
+		ret = tplg_object_attributes_sanity_check(object);
+		if (ret < 0) {
+			SNDERR("Object %s failed sanity check\n", object->name);
 			return -EINVAL;
 		}
 	}
