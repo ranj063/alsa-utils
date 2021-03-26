@@ -33,6 +33,177 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/* Parse manifest object, create the "SectionManifest" and save it */
+static int tplg_build_manifest_object(struct tplg_pre_processor *tplg_pp,
+				      struct tplg_object *object)
+{
+	struct tplg_attribute *name;
+	struct tplg_object *child;
+
+	tplg_pp_debug("Building manifest object: '%s' ...", object->name);
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+	int ret;
+
+	/* write the SectionManifest header and its name */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionManifest.\"%s\" {\n\tdata [\n",
+				   name->value.string);
+	if (ret < 0)
+		goto err;
+
+	/* add the data reference section */
+	list_for_each_entry(child, &object->object_list, list) {
+		if (!strcmp(child->class_name, "data")) {
+			name = tplg_get_attribute_by_name(&child->attribute_list, "name");
+			if (!strcmp(name->value.string, ""))
+				continue;
+
+			ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t\"%s\"\n",
+						   name->value.string);
+			if (ret < 0)
+				goto err;
+		}
+	}
+
+	/* complete the section */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t]\n}\n\n");
+	if (ret < 0) {
+		goto err;
+	}
+
+	print_pre_processed_config(tplg_pp);
+	return 0;
+
+err:
+	SNDERR("failed to build manifest object %s\n", object->name);
+	return ret;
+}
+
+/* Parse data object, create the "SectionData" and save it */
+static int tplg_build_data_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct tplg_attribute *bytes, *name;
+	const char *value = NULL;
+	char *data, *start;
+	int num, size, i, ret;
+
+	tplg_pp_debug("Building data object: '%s' ...", object->name);
+
+	bytes = tplg_get_attribute_by_name(&object->attribute_list, "bytes");
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	/* write the SectionData header and its name */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionData.\"%s\" {\n",
+				   name->value.string);
+	if (ret < 0)
+		goto err;
+
+	if (!bytes || !bytes->cfg)
+		return 0;
+
+	if (snd_config_get_string(bytes->cfg, &value) < 0)
+		return -EINVAL;
+
+	/* get the number of bytes */
+	num = snd_get_hex_num(value);
+	if (num <= 0) {
+		SNDERR("malformed hex variable list %s in object", value, object->name);
+		return -EINVAL;
+	}
+
+	size = num * 1;
+	data = calloc(1, size);
+	if (!data)
+		return -ENOMEM;
+
+	start = data;
+
+	/* copy the bytes data */
+	ret = snd_copy_data_hex((void *)data, 0, value, 1);
+	if (ret < 0) {
+		SNDERR("Failed to copy hex data in object %s", object->name);
+		return ret;
+	}
+
+	/* write the bytes into the tplg_pp->buf */
+	for (i = 0; i < num; i++, data++) {
+		if (!i) {
+			ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\tbytes\t\"");
+			if (ret < 0)
+				goto err;
+		}
+
+		if (i < num - 1) {
+			ret = snd_tplg_save_printf(&tplg_pp->buf, "", "0x%x,", start[i]);
+			if (ret < 0)
+				goto err;
+		} else {
+			ret = snd_tplg_save_printf(&tplg_pp->buf, "", "0x%x\"\n}\n\n", start[i]);
+			if (ret < 0)
+				goto err;
+		}
+	}
+
+	print_pre_processed_config(tplg_pp);
+
+	return 0;
+err:
+	SNDERR("failed to build data object %s\n", object->name);
+	return ret;
+}
+
+static const struct build_function_map object_build_map[] = {
+	{SND_TPLG_CLASS_TYPE_BASE, "data", &tplg_build_data_object},
+	{SND_TPLG_CLASS_TYPE_BASE, "manifest", &tplg_build_manifest_object},
+};
+
+static build_func tplg_pp_lookup_object_build_func(struct tplg_object *object)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(object_build_map); i++) {
+		/* for SND_TPLG_CLASS_TYPE_BASE type objects, also match the object->class_name */
+		if (object->type == object_build_map[i].class_type &&
+		    !strcmp(object_build_map[i].class_name, object->class_name))
+			return object_build_map[i].builder;
+	}
+
+	return NULL;
+}
+
+/* build the object and its child objects recursively */
+static int tplg_build_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct list_head *pos;
+	build_func builder;
+	int ret;
+
+	builder = tplg_pp_lookup_object_build_func(object);
+	if (!builder) {
+		tplg_pp_debug("skipping build for %s\n", object->name);
+		goto child;
+	}
+
+	/* build the object and save the sections to the output buffer */
+	ret = builder(tplg_pp, object);
+	if (ret < 0)
+		return ret;
+
+child:
+	/* build child objects */
+	list_for_each(pos, &object->object_list) {
+		struct tplg_object *child = list_entry(pos, struct tplg_object, list);
+
+		ret = tplg_build_object(tplg_pp, child);
+		if (ret < 0) {
+			SNDERR("Failed to build object %s\n", child->name);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 /*
  * Child objects could have arguments inherited from the parent. Update the name now that the
  * parent has been instantiated and values updated.
@@ -798,6 +969,13 @@ int tplg_create_new_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg
 		ret = tplg_object_attributes_sanity_check(object);
 		if (ret < 0) {
 			SNDERR("Object %s failed sanity check\n", object->name);
+			return -EINVAL;
+		}
+
+		/* Build the object now */
+		ret = tplg_build_object(tplg_pp, object);
+		if (ret < 0) {
+			SNDERR("Error building object %s\n", object->name);
 			return -EINVAL;
 		}
 	}

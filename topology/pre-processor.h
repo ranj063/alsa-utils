@@ -109,6 +109,14 @@ struct tplg_object {
 	struct list_head list; /* item in object list */
 };
 
+typedef int (*build_func)(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
+
+struct build_function_map {
+	int class_type;
+	char class_name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	build_func builder;
+};
+
 void print_pre_processed_config(struct tplg_pre_processor *tplg_pp);
 void tplg_pp_debug(char *fmt, ...);
 int tplg_define_classes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
@@ -120,4 +128,5 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 		   struct tplg_object *parent, struct list_head *list);
 struct tplg_object *tplg_object_lookup_in_list(struct list_head *list, const char *class_name,
 					       char *input);
+struct tplg_attribute *tplg_get_attribute_by_name(struct list_head *list, const char *name);
 #endif
