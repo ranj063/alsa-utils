@@ -9,7 +9,7 @@ endif
 	rst2man $< > $@
 
 alsatplg_SOURCES = topology.c pre-processor.c pre-process-class.c pre-process-object.c \
-		   pre-process-config.c
+		   pre-process-config.c pre-process-base.c
 
 noinst_HEADERS = topology.h pre-processor.h
 

@@ -33,6 +33,58 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+static const struct build_function_map object_build_map[] = {
+	{SND_TPLG_CLASS_TYPE_BASE, "data", &tplg_build_data_object},
+	{SND_TPLG_CLASS_TYPE_BASE, "manifest", &tplg_build_manifest_object},
+};
+
+static build_func tplg_pp_lookup_object_build_func(struct tplg_object *object)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(object_build_map); i++) {
+		/* for SND_TPLG_CLASS_TYPE_BASE type objects, also match the object->class_name */
+		if (object->type == object_build_map[i].class_type &&
+		    !strcmp(object_build_map[i].class_name, object->class_name))
+			return object_build_map[i].builder;
+	}
+
+	return NULL;
+}
+
+/* build the object and its child objects recursively */
+static int tplg_build_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct list_head *pos;
+	build_func builder;
+	int ret;
+
+	builder = tplg_pp_lookup_object_build_func(object);
+	if (!builder) {
+		tplg_pp_debug("skipping build for %s\n", object->name);
+		goto child;
+	}
+
+	/* build the object and save the sections to the output buffer */
+	ret = builder(tplg_pp, object);
+	if (ret < 0)
+		return ret;
+
+child:
+	/* build child objects */
+	list_for_each(pos, &object->object_list) {
+		struct tplg_object *child = list_entry(pos, struct tplg_object, list);
+
+		ret = tplg_build_object(tplg_pp, child);
+		if (ret < 0) {
+			SNDERR("Failed to build object %s\n", child->name);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 /*
  * Child objects could have arguments inherited from the parent. Update the name now that the
  * parent has been instantiated and values updated.
@@ -840,6 +892,13 @@ int tplg_create_new_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg
 		ret = tplg_object_attributes_sanity_check(object);
 		if (ret < 0) {
 			SNDERR("Object %s failed sanity check\n", object->name);
+			return -EINVAL;
+		}
+
+		/* Build the object now */
+		ret = tplg_build_object(tplg_pp, object);
+		if (ret < 0) {
+			SNDERR("Error building object %s\n", object->name);
 			return -EINVAL;
 		}
 	}
