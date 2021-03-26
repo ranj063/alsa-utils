@@ -375,6 +375,86 @@ static int tplg_copy_child_objects(struct tplg_class *class, struct tplg_object 
 	return 0;
 }
 
+/* update attributes inherited from parent */
+static int tplg_update_attributes_from_parent(struct tplg_object *object,
+					    struct tplg_object *ref_object)
+{
+	struct list_head *pos, *pos1;
+
+	/* update object attribute values from reference object */
+	list_for_each(pos, &object->attribute_list) {
+		struct tplg_attribute *attr =  list_entry(pos, struct tplg_attribute, list);
+
+		/* parent cannot override child object's attribute values */
+		if (attr->found)
+			continue;
+
+		list_for_each(pos1, &ref_object->attribute_list) {
+			struct tplg_attribute *ref_attr;
+
+			ref_attr = list_entry(pos1, struct tplg_attribute, list);
+			if (!ref_attr->found)
+				continue;
+
+			if (!strcmp(attr->name, ref_attr->name)) {
+				switch (ref_attr->type) {
+				case SND_CONFIG_TYPE_INTEGER:
+					attr->value.integer = ref_attr->value.integer;
+					attr->type = ref_attr->type;
+					break;
+				case SND_CONFIG_TYPE_INTEGER64:
+					attr->value.integer64 = ref_attr->value.integer64;
+					attr->type = ref_attr->type;
+					break;
+				case SND_CONFIG_TYPE_STRING:
+					snd_strlcpy(attr->value.string,
+						    ref_attr->value.string,
+						    SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+					attr->type = ref_attr->type;
+					break;
+				case SND_CONFIG_TYPE_REAL:
+					attr->value.d = ref_attr->value.d;
+					attr->type = ref_attr->type;
+					break;
+				default:
+					SNDERR("Unsupported type %d for attribute %s\n",
+						attr->type, attr->name);
+					return -EINVAL;
+				}
+				attr->found = true;
+			}
+		}
+	}
+
+	return 0;
+}
+
+/* Propdagate the updated attribute values to child o bjects */
+static int tplg_process_child_objects(struct tplg_object *parent)
+{
+	struct list_head *pos;
+	int ret;
+
+	list_for_each(pos, &parent->object_list) {
+		struct tplg_object *object = list_entry(pos, struct tplg_object, list);
+
+		/* update attribute values inherited from parent */
+		ret = tplg_update_attributes_from_parent(object, parent);
+		if (ret < 0) {
+			SNDERR("failed to update arguments for %s\n", object->name);
+			return ret;
+		}
+
+		/* now process its child objects */
+		ret = tplg_process_child_objects(object);
+		if (ret < 0) {
+			SNDERR("Cannot update child object for %s\n", object->name);
+		}
+	}
+
+	return 0;
+}
+
 /*
  * Create an object  by copying the attribute list, number of arguments, constraints and
  * default attribute values from the class definition.
@@ -454,6 +534,13 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 
 	/* create child objects that are part of the object instance */
 	ret = tplg_create_child_objects(tplg_pp, cfg, object);
+	if (ret < 0) {
+		SNDERR("failed to create child objects for %s\n", object->name);
+		return NULL;
+	}
+
+	/* pass the object attributes to its child objects */
+	ret = tplg_process_child_objects(object);
 	if (ret < 0) {
 		SNDERR("failed to create child objects for %s\n", object->name);
 		return NULL;
