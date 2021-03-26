@@ -25,6 +25,12 @@
 #include "../alsactl/list.h"
 
 #define DEBUG_MAX_LENGTH	256
+#define ARRAY_SIZE(a) (sizeof (a) / sizeof (a)[0])
+
+struct map_elem {
+        const char *name;
+        int id;
+};
 
 #define TPLG_CLASS_ATTRIBUTE_MASK_MANDATORY	1 << 1
 #define TPLG_CLASS_ATTRIBUTE_MASK_IMMUTABLE	1 << 2
@@ -76,6 +82,11 @@ struct tplg_attribute {
 
 /* class types */
 #define SND_TPLG_CLASS_TYPE_BASE		0
+#define SND_TPLG_CLASS_TYPE_WIDGET		1
+#define SND_TPLG_CLASS_TYPE_PIPELINE		2
+#define SND_TPLG_CLASS_TYPE_DAI		3
+#define SND_TPLG_CLASS_TYPE_CONTROL		4
+#define SND_TPLG_CLASS_TYPE_PCM		5
 
 struct tplg_class {
 	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];

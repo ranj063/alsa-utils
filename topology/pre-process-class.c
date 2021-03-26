@@ -34,6 +34,30 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/* mapping of widget text names to types */
+static const struct map_elem class_map[] = {
+	{"Base", SND_TPLG_CLASS_TYPE_BASE},
+	{"Pipeline", SND_TPLG_CLASS_TYPE_PIPELINE},
+	{"Widget", SND_TPLG_CLASS_TYPE_WIDGET},
+	{"Control", SND_TPLG_CLASS_TYPE_CONTROL},
+	{"Dai", SND_TPLG_CLASS_TYPE_DAI},
+	{"PCM", SND_TPLG_CLASS_TYPE_PCM},
+};
+
+
+int tplg_lookup_class_type(const char *c)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(class_map); i++) {
+		if (strcmp(class_map[i].name, c) == 0)
+			return class_map[i].id;
+	}
+
+	SNDERR("Invalid class type: %s\n", c);
+	return -EINVAL;
+}
+
 struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, const char *name)
 {
 	struct tplg_class *class;
@@ -690,6 +714,7 @@ static int tplg_define_class(struct tplg_pre_processor *tplg_pp, snd_config_t *c
 	if (!class)
 		return -ENOMEM;
 
+	class->type = type;
 	snd_strlcpy(class->name, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	INIT_LIST_HEAD(&class->attribute_list);
 	INIT_LIST_HEAD(&class->object_list);
@@ -766,7 +791,19 @@ int tplg_define_classes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg)
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	const char *id;
-	int ret;
+	int class, ret;
+
+	if (snd_config_get_id(cfg, &id) < 0) {
+		SNDERR("Cannot create class with invalid type\n");
+		return -EINVAL;
+	}
+
+	/* classes must belong to one of the pre-defined types */
+	class = tplg_lookup_class_type(id);
+	if (class < 0) {
+		SNDERR("Class type '%s' not supported\n", id);
+		return -EINVAL;
+	}
 
 	/* create class */
 	snd_config_for_each(i, next, cfg) {
@@ -774,7 +811,7 @@ int tplg_define_classes(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg)
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
-		ret = tplg_define_class(tplg_pp, n, SND_TPLG_CLASS_TYPE_BASE);
+		ret = tplg_define_class(tplg_pp, n, class);
 		if (ret < 0) {
 			SNDERR("Failed to create class %s\n", id);
 			return ret;
