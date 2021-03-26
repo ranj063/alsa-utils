@@ -46,6 +46,210 @@ static struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, 
 	return NULL;
 }
 
+/* check if mandatory and immutable attributes have been provided a value */
+static bool tplg_class_attribute_sanity_check(struct tplg_class *class)
+{
+	struct list_head *pos;
+
+	list_for_each(pos, &class->attribute_list) {
+		struct tplg_attribute *attr = list_entry(pos, struct tplg_attribute, list);
+
+		/* immutable attributes must be provided a value in the class definition */
+		if ((attr->constraint.mask & TPLG_CLASS_ATTRIBUTE_MASK_IMMUTABLE) &&
+		    !attr->found) {
+			SNDERR("Missing value for mmutable attribute '%s'in class '%s'",
+			       attr->name, class->name);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/*
+ * Validate attributes that can have an array of values. Note that the array of values
+ * is not parsed here and should be handled by the compiler when the object containing
+ * this attribute is parsed.
+ */
+static int tplg_parse_attribute_compound_value(snd_config_t *cfg, struct tplg_attribute *attr)
+{
+	snd_config_iterator_t i, next;
+	struct list_head *pos;
+	snd_config_t *n;
+
+	/* every value in the array must be valid */
+	snd_config_for_each(i, next, cfg) {
+		const char *id, *s;
+		bool found = false;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0) {
+			SNDERR("invalid cfg id for attribute %s\n", attr->name);
+			return -EINVAL;
+		}
+
+		if (snd_config_get_string(n, &s) < 0) {
+			SNDERR("invalid string for attribute %s\n", attr->name);
+			return -EINVAL;
+		}
+
+		if (list_empty(&attr->constraint.value_list))
+			continue;
+
+		list_for_each(pos, &attr->constraint.value_list) {
+			struct tplg_attribute_ref *v;
+
+			v = list_entry(pos, struct tplg_attribute_ref, list);
+			if (!strcmp(s, v->string)) {
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			SNDERR("Invalid value %s for attribute %s\n", s, attr->name);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * Parse attribute values and set the attribute's type field. Attributes/arguments with
+ * constraints are validated against them before saving the value.
+ */
+int tplg_parse_attribute_value(snd_config_t *cfg, struct list_head *list)
+{
+	snd_config_type_t type = snd_config_get_type(cfg);
+	struct tplg_attribute *attr = NULL;
+	struct list_head *pos;
+	bool found = false;
+	int err;
+	const char *id;
+
+	if (snd_config_get_id(cfg, &id) < 0) {
+		SNDERR("No name for attribute\n");
+		return -EINVAL;
+	}
+
+	/* ignore non-existent attributes */
+	list_for_each(pos, list) {
+		attr = list_entry(pos, struct tplg_attribute, list);
+
+		if (!strcmp(attr->name, id)) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found)
+		return 0;
+
+	attr->cfg = cfg;
+
+	/* parse value */
+	switch (type) {
+	case SND_CONFIG_TYPE_INTEGER:
+	{
+		long v;
+
+		err = snd_config_get_integer(cfg, &v);
+		assert(err >= 0);
+
+		if (v < attr->constraint.min || v > attr->constraint.max) {
+			SNDERR("Value %d out of range for attribute %s\n", v, attr->name);
+			return -EINVAL;
+		}
+		attr->value.integer = v;
+		break;
+	}
+	case SND_CONFIG_TYPE_INTEGER64:
+	{
+		long long v;
+
+		err = snd_config_get_integer64(cfg, &v);
+		assert(err >= 0);
+		if (v < attr->constraint.min || v > attr->constraint.max) {
+			SNDERR("Value %ld out of range for attribute %s\n", v, attr->name);
+			return -EINVAL;
+		}
+
+		attr->value.integer64 = v;
+		break;
+	}
+	case SND_CONFIG_TYPE_STRING:
+	{
+		struct list_head *pos;
+		const char *s;
+
+		err = snd_config_get_string(cfg, &s);
+		assert(err >= 0);
+
+		/* attributes with no pre-defined valid values */
+		if (list_empty(&attr->constraint.value_list)) {
+
+			/* change bool string to integer value */
+			if (!strcmp(s, "true")) {
+				attr->value.integer = 1;
+				attr->type = SND_CONFIG_TYPE_INTEGER;
+				attr->found = true;
+				return 0;
+			} else if (!strcmp(s, "false")) {
+				attr->value.integer = 0;
+				attr->type = SND_CONFIG_TYPE_INTEGER;
+				attr->found = true;
+				return 0;
+			}
+
+			snd_strlcpy(attr->value.string, s, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			break;
+		}
+
+		/* Check if value is in the accepted valid values list */
+		list_for_each(pos, &attr->constraint.value_list) {
+			struct tplg_attribute_ref *v;
+
+			v = list_entry(pos, struct tplg_attribute_ref, list);
+
+			if (!strcmp(s, v->string)) {
+				snd_strlcpy(attr->value.string, v->string,
+					    SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+				attr->type = type;
+				attr->found = true;
+				return 0;
+			}
+		}
+
+		SNDERR("Invalid value %s for attribute %s\n", s, attr->name);
+		return -EINVAL;
+	}
+	case SND_CONFIG_TYPE_REAL:
+	{
+		double d;
+
+		err = snd_config_get_real(cfg, &d);
+		assert(err >= 0);
+		attr->value.d = d;
+		break;
+	}
+	case SND_CONFIG_TYPE_COMPOUND:
+		/* for attributes that have an array of values */
+		err = tplg_parse_attribute_compound_value(cfg, attr);
+		if (err < 0)
+			return err;
+		break;
+	default:
+		SNDERR("Unsupported type %d for attribute %s\n", type, attr->name);
+		return -EINVAL;
+	}
+
+	attr->type = type;
+	attr->found = true;
+
+	return 0;
+}
+
 /* save valid values references for attributes */
 static int tplg_parse_constraint_valid_value_ref(struct tplg_pre_processor *tplg_pp ATTRIBUTE_UNUSED,
 					      snd_config_t *cfg, struct tplg_attribute *attr)
@@ -372,7 +576,11 @@ static int tplg_parse_class_attribute_categories(snd_config_t *cfg, struct tplg_
 			struct tplg_attribute *unique_attr;
 			const char *s;
 			int err = snd_config_get_string(n, &s);
-			assert(err >= 0);
+			if (err < 0) {
+				SNDERR("Invalid value for unique attribute in claass %s\n",
+				       class->name);
+				return err;
+			}
 
 			unique_attr = tplg_get_attribute_by_name(&class->attribute_list, s);
 			if (!unique_attr)
@@ -458,8 +666,20 @@ static int tplg_define_class(struct tplg_pre_processor *tplg_pp, snd_config_t *c
 			}
 			continue;
 		}
+
+		/* class definitions come with default attribute values, process them too */
+		ret = tplg_parse_attribute_value(n, &class->attribute_list);
+		if (ret < 0) {
+			SNDERR("failed to parse attribute value for class %s\n", class->name);
+			return -EINVAL;
+		}
 	}
 
+	/* ensure immutable attributes have been provided values */
+	ret = tplg_class_attribute_sanity_check(class);
+	if (ret < 0)
+		SNDERR("Failed to create class: '%s'\n", class->name);
+	
 	tplg_pp_debug("Created class: '%s'\n", class->name);
 
 	return 0;
