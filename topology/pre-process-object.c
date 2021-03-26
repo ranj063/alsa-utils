@@ -33,6 +33,52 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/* look up object based on class type and unique attribute value in a list */
+struct tplg_object *tplg_object_lookup_in_list(struct list_head *list, const char *class_name,
+					       char *input)
+{
+        struct tplg_object *object;
+
+        if (!class_name)
+                return NULL;
+
+        list_for_each_entry(object, list, list) {
+		struct tplg_attribute *attr;
+		bool found = false;
+
+		/* check if class_name natches */
+                if (strcmp(object->class_name, class_name))
+			continue;
+
+		/* find attribute with TPLG_CLASS_ATTRIBUTE_MASK_UNIQUE mask */
+		list_for_each_entry(attr, &object->attribute_list, list) {
+			if (attr->constraint.mask & TPLG_CLASS_ATTRIBUTE_MASK_UNIQUE) {
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+			continue;
+
+		/* check if the value matches based on type */
+		switch (attr->type) {
+		case SND_CONFIG_TYPE_INTEGER:
+			if (attr->value.integer == atoi(input))
+				return object;
+			break;
+		case SND_CONFIG_TYPE_STRING:
+			if (!strcmp(attr->value.string, input))
+				return object;
+			break;
+		default:
+			break;
+		}
+        }
+
+        return NULL;
+}
+
 /* Process the attribute values provided during object instantiation */
 static int tplg_process_attributes(snd_config_t *cfg, struct tplg_object *object)
 {

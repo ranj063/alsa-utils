@@ -107,4 +107,6 @@ int tplg_parse_attribute_value(snd_config_t *cfg, struct list_head *list, bool o
 struct tplg_object *
 tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct tplg_class *class,
 		   struct tplg_object *parent, struct list_head *list);
+struct tplg_object *tplg_object_lookup_in_list(struct list_head *list, const char *class_name,
+					       char *input);
 #endif
