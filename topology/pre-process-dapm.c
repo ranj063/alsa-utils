@@ -79,9 +79,11 @@ int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_obj
 	if (ret < 0)
 		SNDERR("Failed to save DAPM widget %s\n", widget->name);
 
-	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "}\n\n");
-
 	print_pre_processed_config(tplg_pp);
+
+	ret = tplg_pp_add_object_data(tplg_pp, object);
+	if (ret < 0)
+		SNDERR("Failed to add data section for widget %s\n", widget->name);
 
 err:
 	free(widget);

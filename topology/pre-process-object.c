@@ -33,6 +33,163 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+static int tplg_pp_save_object_tuple_value(struct tplg_pre_processor *tplg_pp,
+					   struct tplg_object *object, struct tplg_attribute *attr)
+{
+	switch (attr->type) {
+	case SND_CONFIG_TYPE_INTEGER:
+		return snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t%s\t\"%d\"\n",
+					    attr->name, attr->value.integer);
+	case SND_CONFIG_TYPE_INTEGER64:
+		return snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t%s\t\"%ld\"\n",
+					    attr->name, attr->value.integer64);
+	case SND_CONFIG_TYPE_STRING:
+		return snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t%s\t\"%s\"\n",
+					    attr->name, attr->value.string);
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int tplg_pp_save_object_tuple_sections(struct tplg_pre_processor *tplg_pp,
+					      struct tplg_object *object)
+{
+	struct tplg_attribute_set *set;
+	int ret;
+
+	tplg_pp_debug("Building vendor tuples sections for object: '%s' ...", object->name);
+
+	list_for_each_entry(set, &object->attribute_set_list, list) {
+		struct tplg_attribute *attr;
+		char *type = strchr(set->token_ref, '.');
+		char *token_name;
+		int len;
+
+		len = strlen(set->token_ref) - strlen(type) + 1;
+		token_name = calloc(1, len);
+		if (!token_name)
+			return -ENOMEM;
+
+		/* save the SectionVendorTuples for this set */
+		snd_strlcpy(token_name, set->token_ref, len);
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "",
+					   "SectionVendorTuples.\"%s.%s.%s\" {\n",
+					   object->name, token_name, type + 1);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\ttokens\t\"%s\"\n", token_name);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\ttuples.\"%s\" {\n", type + 1);
+		if (ret < 0)
+			return ret;
+
+		/* save the tuples */
+		list_for_each_entry(attr, &set->attribute_list, list)
+			tplg_pp_save_object_tuple_value(tplg_pp, object, attr);
+
+		/* close the SectionVendorTuples */
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t}\n}\n\n");
+		if (ret < 0)
+			return ret;
+	}
+
+	print_pre_processed_config(tplg_pp);
+
+	return 0;
+}
+
+static int tplg_pp_save_object_data_sections(struct tplg_pre_processor *tplg_pp,
+					     struct tplg_object *object)
+{
+	struct tplg_attribute_set *set;
+	int ret;
+
+	tplg_pp_debug("Building data sections for object: '%s' ...", object->name);
+
+	/* first add the data section to the object */
+	list_for_each_entry(set, &object->attribute_set_list, list) {
+		char *type = strchr(set->token_ref, '.');
+		char *token_name;
+		int len;
+
+		len = strlen(set->token_ref) - strlen(type) + 1;
+		token_name = calloc(1, len);
+		if (!token_name)
+			return -ENOMEM;
+
+		snd_strlcpy(token_name, set->token_ref, len);
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionData.\"%s.%s.%s\" {\n",
+					   object->name, token_name, type + 1);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\ttuples\t\"%s.%s.%s\"\n",
+					   object->name, token_name, type + 1);
+		if (ret < 0)
+			return ret;
+
+		/* close the SectionData */
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "", "}\n\n");
+		if (ret < 0)
+			return ret;
+	}
+
+	print_pre_processed_config(tplg_pp);
+
+	ret = tplg_pp_save_object_tuple_sections(tplg_pp, object);
+	if (ret < 0)
+		SNDERR("Failed to save SectionVendorTuples for widget %s\n", object->name);
+
+	return 0;
+}
+
+int tplg_pp_add_object_data(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct tplg_attribute_set *set;
+	int ret;
+
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\tdata [\n");
+	if (ret < 0)
+		return ret;
+
+	/* first add the data section to the object */
+	list_for_each_entry(set, &object->attribute_set_list, list) {
+		char *type = strchr(set->token_ref, '.');
+		char *token_name;
+		int len;
+
+		len = strlen(set->token_ref) - strlen(type) + 1;
+		token_name = calloc(1, len);
+		if (!token_name)
+			return -ENOMEM;
+
+		snd_strlcpy(token_name, set->token_ref, len);
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t\"%s.%s.%s\"\n",
+					   object->name, token_name, type + 1);
+		if (ret < 0)
+			return ret;
+	}
+
+	/* close the parent section */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t]\n}\n\n");
+	if (ret < 0)
+		return ret;
+
+	print_pre_processed_config(tplg_pp);
+
+	/* save the SectionData */
+	ret = tplg_pp_save_object_data_sections(tplg_pp, object);
+	if (ret < 0)
+		SNDERR("Failed to save SectionData for widget %s\n", object->name);
+
+	return 0;
+}
+
 /* Parse VendorToken object, create the "SectionManifest" and save it */
 static int tplg_build_vendor_token_object(struct tplg_pre_processor *tplg_pp,
 					  struct tplg_object *object)
@@ -167,6 +324,7 @@ static int tplg_get_object_attribute_set(struct tplg_object *object,
 	*out = set;
 	return 0;
 }
+
 
 /* Build attribute sets to add SectionVendorTuples */
 int tplg_build_object_attribute_sets(struct tplg_object *object)
