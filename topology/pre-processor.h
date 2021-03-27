@@ -14,21 +14,14 @@
  *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
-#ifndef __TOPOLOGY_H
-#define __TOPOLOGY_H
+#ifndef __PRE_PROCESSOR_H
+#define __PRE_PROCESSOR_H
 
-#include <stdlib.h>
-#include <alsa/topology.h>
-#include "../alsactl/list.h"
+#include <stdarg.h>
+#include "topology.h"
 
-/* pre_processor */
-struct tplg_pre_processor {
-	struct list_head class_list;
-	struct snd_tplg_buf buf;
-	size_t dbg_print_len;
-};
+#define DEBUG_MAX_LENGTH	256
 
-int pre_process(struct tplg_pre_processor *tplg_pp, char *config, size_t config_size);
-void init_pre_precessor(struct tplg_pre_processor *tplg_pp);
-void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp);
+void print_pre_processed_config(struct tplg_pre_processor *tplg_pp);
+void tplg_pp_debug(char *fmt, ...);
 #endif

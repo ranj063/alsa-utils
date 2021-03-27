@@ -17,6 +17,8 @@
   The full GNU General Public License is included in this distribution
   in the file called LICENSE.GPL.
 */
+
+#include <stdarg.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
@@ -27,6 +29,35 @@
 #include <alsa/conf.h>
 #include "gettext.h"
 #include "topology.h"
+#include "pre-processor.h"
+
+#ifdef TPLG_DEBUG
+void tplg_pp_debug(char *fmt, ...)
+{
+	char msg[DEBUG_MAX_LENGTH];
+	va_list va;
+
+	va_start(va, fmt);
+	vsnprintf(msg, DEBUG_MAX_LENGTH, fmt, va);
+	va_end(va);
+
+	fprintf(stdout, "%s\n", msg);
+}
+
+void print_pre_processed_config(struct tplg_pre_processor *tplg_pp)
+{
+	int i;
+
+	for (i = tplg_pp->dbg_print_len; i < tplg_pp->buf.dst_len; i++)
+		fprintf(stdout, "%c", tplg_pp->buf.dst[i]);
+
+	tplg_pp->dbg_print_len = tplg_pp->buf.dst_len;
+}
+#else
+void tplg_pp_debug(char *fmt, ...) {}
+void print_pre_processed_config(struct tplg_pre_processor *tplg_pp) {}
+#endif
+
 
 /*
  * Parse compound config nodes
