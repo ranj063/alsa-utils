@@ -129,4 +129,5 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 struct tplg_object *tplg_object_lookup_in_list(struct list_head *list, const char *class_name,
 					       char *input);
 struct tplg_attribute *tplg_get_attribute_by_name(struct list_head *list, const char *name);
+int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
 #endif

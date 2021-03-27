@@ -155,6 +155,7 @@ err:
 static const struct build_function_map object_build_map[] = {
 	{SND_TPLG_CLASS_TYPE_BASE, "data", &tplg_build_data_object},
 	{SND_TPLG_CLASS_TYPE_BASE, "manifest", &tplg_build_manifest_object},
+	{SND_TPLG_CLASS_TYPE_WIDGET, "", &tplg_build_widget_object},
 };
 
 static build_func tplg_pp_lookup_object_build_func(struct tplg_object *object)
@@ -162,6 +163,10 @@ static build_func tplg_pp_lookup_object_build_func(struct tplg_object *object)
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(object_build_map); i++) {
+		if (object->type == SND_TPLG_CLASS_TYPE_WIDGET &&
+		    object_build_map[i].class_type == SND_TPLG_CLASS_TYPE_WIDGET)
+			return object_build_map[i].builder;
+
 		/* for SND_TPLG_CLASS_TYPE_BASE type objects, also match the object->class_name */
 		if (object->type == object_build_map[i].class_type &&
 		    !strcmp(object_build_map[i].class_name, object->class_name))
