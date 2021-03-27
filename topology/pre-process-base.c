@@ -33,6 +33,65 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/* Parse VendorToken object, create the "SectionManifest" and save it */
+int tplg_build_vendor_token_object(struct tplg_pre_processor *tplg_pp,
+				   struct tplg_object *object)
+{
+	snd_config_t *top, *vtop;
+	snd_config_iterator_t i, next;
+	struct tplg_attribute *name;
+	snd_config_t *n;
+	const char *id;
+	int ret;
+
+	tplg_pp_debug("Building vendor token object: '%s' ...", object->name);
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	ret = snd_config_search(tplg_pp->cfg, "SectionVendorTokens", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionVendorTokens",
+					  SND_CONFIG_TYPE_COMPOUND, tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Error creating SectionVendorTokens config\n");
+			return ret;
+		}
+	}
+
+	/* create the node with the vendor token name */
+	ret = snd_config_make_add(&vtop, name->value.string,
+				  SND_CONFIG_TYPE_COMPOUND, top);
+	if (ret < 0) {
+		SNDERR("Error creating VendorToken config for %s\n", object->name);
+		return ret;
+	}
+
+	/* add the tokens */
+	snd_config_for_each(i, next, object->cfg) {
+		snd_config_t *dst;
+		n = snd_config_iterator_entry(i);
+
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		ret = snd_config_copy(&dst, n);
+		if (ret < 0) {
+			SNDERR("Error copying config node %s for '%s'\n", id, object->name);
+			return ret;
+		}
+
+		ret = snd_config_add(vtop, dst);
+		if (ret < 0) {
+			SNDERR("Error adding vendortoken %s for %s\n", id, object->name);
+			return ret;
+		}
+	}
+
+	tplg_pp_config_debug(tplg_pp, top);
+
+	return ret;
+}
+
 /* Parse manifest object, create the "SectionManifest" and save it */
 int tplg_build_manifest_object(struct tplg_pre_processor *tplg_pp,
 			       struct tplg_object *object)

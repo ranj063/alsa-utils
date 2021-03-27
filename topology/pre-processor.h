@@ -143,4 +143,6 @@ int tplg_build_data_object(struct tplg_pre_processor *tplg_pp, struct tplg_objec
 int tplg_build_manifest_object(struct tplg_pre_processor *tplg_pp,
 			       struct tplg_object *object);
 int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
+int tplg_build_vendor_token_object(struct tplg_pre_processor *tplg_pp,
+				   struct tplg_object *object);
 #endif
