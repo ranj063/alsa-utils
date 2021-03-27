@@ -20,6 +20,9 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <alsa/input.h>
+#include <alsa/output.h>
+#include <alsa/conf.h>
 #include <sound/asound.h>
 #include "topology.h"
 #include "../alsactl/list.h"
@@ -145,4 +148,6 @@ int tplg_build_manifest_object(struct tplg_pre_processor *tplg_pp,
 int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
 int tplg_build_vendor_token_object(struct tplg_pre_processor *tplg_pp,
 				   struct tplg_object *object);
+int tplg_pp_add_object_data(struct tplg_pre_processor *tplg_pp, struct tplg_object *object,
+			    snd_config_t *top);
 #endif

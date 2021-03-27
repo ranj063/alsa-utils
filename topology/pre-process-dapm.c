@@ -185,7 +185,11 @@ int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_obj
 	if (ret < 0)
 		return ret;
 
+	ret = tplg_pp_add_object_data(tplg_pp, object, wtop);
+	if (ret < 0)
+		SNDERR("Failed to add data section for widget %s\n", object->name);
+
 	tplg_pp_config_debug(tplg_pp, top);
 
-	return 0;
+	return ret;
 }

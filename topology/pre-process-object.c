@@ -33,6 +33,207 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+static int tplg_pp_add_object_tuple_sections(struct tplg_pre_processor *tplg_pp,
+					      struct tplg_object *object)
+{
+	struct tplg_attribute_set *set;
+	snd_config_t *top;
+	int ret;
+
+	tplg_pp_debug("Building vendor tuples sections for object: '%s' ...", object->name);
+
+	ret = snd_config_search(tplg_pp->cfg, "SectionVendorTuples", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionVendorTuples",
+					  SND_CONFIG_TYPE_COMPOUND, tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Error creating SectionVendorTuples config\n");
+			return ret;
+		}
+	}
+
+	list_for_each_entry(set, &object->attribute_set_list, list) {
+		struct tplg_attribute *attr;
+		snd_config_t *vcfg, *child, *tuples;
+		char *data_name, *token_name, *type;
+		size_t len;
+
+		/* create the new VendorToken config */
+		len = strlen(object->name) + strlen(set->token_ref) + 2;
+		data_name = calloc(1, len + 1);
+		snprintf(data_name, len + 1, "%s.%s", object->name, set->token_ref);
+
+		type = strchr(set->token_ref, '.');
+
+		ret = snd_config_make_add(&vcfg, data_name, SND_CONFIG_TYPE_COMPOUND,
+					  top);
+		if (ret < 0) {
+			SNDERR("Error creating vendor tuples config for '%s'\n", object->name);
+			return ret;
+		}
+
+		/* add token config */
+		len = strlen(set->token_ref) - strlen(type);
+		token_name = calloc(1, len + 1);
+		snprintf(token_name, len + 1, "%s", set->token_ref);
+		ret = snd_config_make_add(&child, "tokens", SND_CONFIG_TYPE_STRING,
+					  vcfg);
+		if (ret < 0) {
+			SNDERR("Error creating tokens config for '%s'\n", object->name);
+			return ret;
+		}
+
+		ret = snd_config_set_string(child, token_name);
+		if (ret < 0) {
+			SNDERR("Error setting tokens config for '%s'\n", object->name);
+			return ret;
+		}
+
+		/* add tuples section */
+		ret = snd_config_make_add(&tuples, "tuples", SND_CONFIG_TYPE_COMPOUND,
+					  vcfg);
+		if (ret < 0) {
+			SNDERR("Error creating tuples config for '%s'\n", object->name);
+			return ret;
+		}
+
+		ret = snd_config_make_add(&child, type + 1, SND_CONFIG_TYPE_COMPOUND,
+					  tuples);
+		if (ret < 0) {
+			SNDERR("Error creating tuples config for '%s'\n", object->name);
+			return ret;
+		}
+
+		/* add each token-tuple pair */
+		list_for_each_entry(attr, &set->attribute_list, list) {
+			snd_config_t *dst;
+			const char *id;
+
+			if (!attr->cfg) {
+				SNDERR("no config for %s\n", attr->name);
+				continue;
+			}
+
+			if (snd_config_get_id(attr->cfg, &id) < 0)
+				continue;
+
+			/* copy the attribute cfg */
+			ret = snd_config_copy(&dst, attr->cfg);
+			if (ret < 0) {
+				SNDERR("Error copying config node %s for '%s'\n", id, object->name);
+				return ret;
+			}
+
+			ret = snd_config_add(child, dst);
+			if (ret < 0) {
+				SNDERR("Error adding vendor token %s for %s\n", id, object->name);
+				return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static int tplg_pp_add_object_data_sections(struct tplg_pre_processor *tplg_pp,
+					    struct tplg_object *object)
+{
+	struct tplg_attribute_set *set;
+	snd_config_t *top;
+	int ret;
+
+	tplg_pp_debug("Building data sections for object: '%s' ...", object->name);
+
+	ret = snd_config_search(tplg_pp->cfg, "SectionData", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionData", SND_CONFIG_TYPE_COMPOUND,
+					  tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Failed to add SectionData\n");
+			return ret;
+		}
+	}
+
+	/* first add the data section to the object */
+	list_for_each_entry(set, &object->attribute_set_list, list) {
+		snd_config_t *child, *data_cfg;
+		char *data_name;
+		size_t len;
+
+		len = strlen(object->name) + strlen(set->token_ref) + 2;
+		data_name = calloc(1, len + 1);
+		snprintf(data_name, len + 1, "%s.%s", object->name, set->token_ref);
+
+		ret = snd_config_make_add(&data_cfg, data_name, SND_CONFIG_TYPE_COMPOUND, top);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_config_make_add(&child, "tuples", SND_CONFIG_TYPE_STRING, data_cfg);
+		if (ret < 0) {
+			SNDERR("error adding data ref for %s\n", object->name);
+			return ret;
+		}
+
+		ret = snd_config_set_string(child, data_name);
+		if (ret < 0) {
+			SNDERR("error setting tuples ref for %s\n", object->name);
+			return ret;
+		}
+	}
+
+	ret = tplg_pp_add_object_tuple_sections(tplg_pp, object);
+	if (ret < 0)
+		SNDERR("Failed to add SectionVendorTuples configs for widget %s\n",
+		       object->name);
+
+	return 0;
+}
+
+int tplg_pp_add_object_data(struct tplg_pre_processor *tplg_pp, struct tplg_object *object,
+			    snd_config_t *top)
+{
+	struct tplg_attribute_set *set;
+	snd_config_t *data_cfg;
+	int ret, i = 0;
+
+	/* add data config to top */
+	ret = snd_config_make_add(&data_cfg, "data", SND_CONFIG_TYPE_COMPOUND, top);
+	if (ret < 0) {
+		SNDERR("error creating data config for %s\n", object->name);
+	}
+
+	/* add data reference for each attribute set in the object */
+	list_for_each_entry(set, &object->attribute_set_list, list) {
+		snd_config_t *child;
+		char id[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+		char *data_name;
+		size_t len;
+
+		snprintf(id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%d", i++);
+		ret = snd_config_make_add(&child, id, SND_CONFIG_TYPE_STRING, data_cfg);
+		if (ret < 0) {
+			SNDERR("error adding data ref for %s\n", object->name);
+			return ret;
+		}
+
+		len = strlen(object->name) + strlen(set->token_ref) + 1;
+		data_name = calloc(1, len + 1);
+		snprintf(data_name, len + 1, "%s.%s", object->name, set->token_ref);
+		ret = snd_config_set_string(child, data_name);
+		if (ret < 0) {
+			SNDERR("error setting data ref for %s\n", object->name);
+			return ret;
+		}
+	}
+
+	/* save the SectionData configs for each attribute set */
+	ret = tplg_pp_add_object_data_sections(tplg_pp, object);
+	if (ret < 0)
+		SNDERR("Failed to save SectionData for widget %s\n", object->name);
+
+	return 0;
+}
+
 static int tplg_copy_attribute(struct tplg_attribute *attr, struct tplg_attribute *ref_attr);
 
 static int tplg_get_object_attribute_set(struct tplg_object *object,
@@ -59,6 +260,7 @@ static int tplg_get_object_attribute_set(struct tplg_object *object,
 	*out = set;
 	return 0;
 }
+
 
 /* Build attribute sets to add SectionVendorTuples */
 int tplg_build_object_attribute_sets(struct tplg_object *object)
