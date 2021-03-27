@@ -33,6 +33,63 @@
 #include "topology.h"
 #include "pre-processor.h"
 
+/* Parse VendorToken object, create the "SectionManifest" and save it */
+static int tplg_build_vendor_token_object(struct tplg_pre_processor *tplg_pp,
+					  struct tplg_object *object)
+{
+	snd_config_t *cfg = object->cfg;
+	snd_config_iterator_t i, next;
+	struct tplg_attribute *name;
+	snd_config_t *n;
+	const char *id;
+	int ret;
+
+	tplg_pp_debug("Building vendor token object: '%s' ...", object->name);
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	/* write the SectionMVendorToken header and its tokens */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionVendorTokens.\"%s\" {\n",
+				   name->value.string);
+	if (ret < 0)
+		goto err;
+
+	/* add the tokens */
+	snd_config_for_each(i, next, cfg) {
+		long v;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0) {
+			SNDERR("Cannot get token name for object '%s'\n", object->name);
+			return -EINVAL;
+		}
+
+		ret = snd_config_get_integer(n, &v);
+		if (ret < 0) {
+			SNDERR("Illegal token value in object '%s'\n", object->name);
+			return -EINVAL;
+		}
+
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t%s %d\n", id, v);
+		if (ret < 0)
+			goto err;
+
+	}
+
+	/* complete the section */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "}\n\n");
+	if (ret < 0) {
+		goto err;
+	}
+
+	print_pre_processed_config(tplg_pp);
+	return 0;
+
+err:
+	SNDERR("failed to build vendor token object %s\n", object->name);
+	return ret;
+}
+
 /* copy the class attribute values and constraints */
 static int tplg_copy_attribute(struct tplg_attribute *attr, struct tplg_attribute *ref_attr)
 {
@@ -270,6 +327,7 @@ err:
 static const struct build_function_map object_build_map[] = {
 	{SND_TPLG_CLASS_TYPE_BASE, "data", &tplg_build_data_object},
 	{SND_TPLG_CLASS_TYPE_BASE, "manifest", &tplg_build_manifest_object},
+	{SND_TPLG_CLASS_TYPE_BASE, "VendorToken", &tplg_build_vendor_token_object},
 	{SND_TPLG_CLASS_TYPE_WIDGET, "", &tplg_build_widget_object},
 };
 
