@@ -18,6 +18,7 @@
 #define __TOPOLOGY_H
 
 #include <stdlib.h>
+#include <alsa/global.h>
 #include <alsa/topology.h>
 #include "../alsactl/list.h"
 

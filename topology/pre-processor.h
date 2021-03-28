@@ -141,4 +141,5 @@ int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_obj
 int tplg_pp_add_object_data(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
 int tplg_pp_build_tlv_object(struct tplg_pre_processor *tplg_pp,
 			     struct tplg_object *object);
+int tplg_build_mixer_control(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
 #endif
