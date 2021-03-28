@@ -35,6 +35,122 @@
 #include "pre-processor.h"
 #include "../alsactl/list.h"
 
+static int tplg_pp_create_hwcfg_config(snd_config_t *parent, char *name)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make_add(&top, name, SND_CONFIG_TYPE_COMPOUND, parent);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "id", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "format", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "bclk", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "bclk_freq", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "bclk_invert", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "fsync", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "fsync_invert", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "fsync_freq", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "mclk", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "mclk_freq", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "pm_gate_clocks", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "tdm_slots", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "tdm_slot_width", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "tx_slots", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "rx_slots", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "tx_channels", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "rx_channels", SND_CONFIG_TYPE_INTEGER, top);
+
+	return ret;
+}
+
+int tplg_pp_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct tplg_attribute *attr, *id;
+	snd_config_t *top, *hw_cfg;
+	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	int ret;
+
+	tplg_pp_debug("Building SectionHWConfig for: '%s' ...", object->name);
+
+	/* get top-level SectionControlMixer config */
+	ret = snd_config_search(tplg_pp->cfg, "SectionHWConfig", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionHWConfig",
+					  SND_CONFIG_TYPE_COMPOUND, tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Error creating SectionHWConfig config\n");
+			return ret;
+		}
+	}
+
+	id = tplg_get_attribute_by_name(&object->attribute_list, "id");
+	ret = snprintf(name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s.%ld", object->parent->name,
+		       id->value.integer);
+	if (ret > SNDRV_CTL_ELEM_ID_NAME_MAXLEN) {
+		SNDERR("hwcfg name too long\n");
+		return ret;
+	}
+
+	/* create hwcfg config */
+	ret = tplg_pp_create_hwcfg_config(top, name);
+	if (ret < 0) {
+		SNDERR("Error creating hw_cfg config for %s\n", object->name);
+		return ret;
+	}
+
+	hw_cfg = tplg_find_config(top, name);
+	if (!hw_cfg) {
+		SNDERR("Can't find hwcfg config %s\n", object->name);
+		return -EINVAL;
+	}
+
+	/* update hwcfg config */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+
+		ret = tplg_attribute_config_update(hw_cfg, attr);
+		if (ret < 0) {
+			SNDERR("failed to add config for attribute %s in hwcfg %s\n",
+			       attr->name, object->name);
+			return ret;
+		}
+	}
+
+	return ret;
+}
+
 static int tplg_pp_create_be_config(snd_config_t *parent, char *name)
 {
 	snd_config_t *top, *child;
