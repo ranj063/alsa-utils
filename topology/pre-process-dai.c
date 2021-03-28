@@ -274,3 +274,162 @@ int tplg_build_dai_object(struct tplg_pre_processor *tplg_pp, struct tplg_object
 
 	return 0;
 }
+
+static int tplg_pp_create_pcm_config(snd_config_t *parent, char *name)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make_add(&top, name, SND_CONFIG_TYPE_COMPOUND, parent);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "id", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "compress", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "symmertic_rates",
+					  SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "symmetric_channels",
+					  SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "symmetric_sample_bits",
+					  SND_CONFIG_TYPE_INTEGER, top);
+
+	return ret;
+}
+
+int tplg_build_pcm_object(struct tplg_pre_processor *tplg_pp,
+			 struct tplg_object *object)
+{
+	struct tplg_attribute *name, *attr;
+	struct tplg_object *child;
+	snd_config_t *top, *pcm_cfg, *pcm;
+	int ret;
+
+	tplg_pp_debug("Building SectionPCM for: '%s' ...", object->name);
+
+	/* get top-level SectionControlMixer config */
+	ret = snd_config_search(tplg_pp->cfg, "SectionPCM", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionPCM",
+					  SND_CONFIG_TYPE_COMPOUND, tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Error creating SectionPCM config\n");
+			return ret;
+		}
+	}
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	/* create BE config */
+	ret = tplg_pp_create_pcm_config(top, name->value.string);
+	if (ret < 0) {
+		SNDERR("Error creating BE config for %s\n", object->name);
+		return ret;
+	}
+
+	pcm_cfg = tplg_find_config(top, name->value.string);
+	if (!pcm_cfg) {
+		SNDERR("Can't find BE config %s\n", object->name);
+		return -EINVAL;
+	}
+
+	/* update BE config */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+
+		ret = tplg_attribute_config_update(pcm_cfg, attr);
+		if (ret < 0) {
+			SNDERR("failed to add config for attribute %s in hwcfg %s\n",
+			       attr->name, object->name);
+			return ret;
+		}
+	}
+
+	ret = snd_config_make_add(&pcm, "pcm", SND_CONFIG_TYPE_COMPOUND, pcm_cfg);
+	if (ret < 0) {
+		SNDERR("Error creating pcm config for %s\n", object->name);
+		return ret;
+	}
+
+	/* add PCM fe_dai and caps */
+	list_for_each_entry(child, &object->object_list, list) {
+		if (!child->cfg)
+			continue;
+
+		if (!strcmp(child->class_name, "fe_dai")) {
+			struct tplg_attribute *id, *name;
+			snd_config_t *dai_cfg, *childcfg, *dai_name;
+
+			ret = snd_config_make_add(&dai_cfg, "dai",
+				  SND_CONFIG_TYPE_COMPOUND, pcm_cfg);
+			if (ret < 0) {
+				SNDERR("Error creating fe dai config for %s\n", object->name);
+				return ret;
+			}
+
+			id = tplg_get_attribute_by_name(&child->attribute_list, "id");
+			name = tplg_get_attribute_by_name(&child->attribute_list, "name");
+
+			ret = snd_config_make_add(&dai_name, name->value.string,
+						  SND_CONFIG_TYPE_COMPOUND, dai_cfg);
+			if (ret < 0) {
+				SNDERR("Error creating fe dai name for %s\n", object->name);
+				return ret;
+			}
+
+			ret = snd_config_make_add(&childcfg, "id",
+						  SND_CONFIG_TYPE_INTEGER, dai_name);
+			if (ret < 0) {
+				SNDERR("Error creating fe dai id for %s\n", object->name);
+				return ret;
+			}
+
+			ret = snd_config_set_integer(childcfg, id->value.integer);
+			if (ret < 0) {
+				SNDERR("Error setting fe dai config for %s\n", object->name);
+				return ret;
+			}
+
+		}
+
+		if (!strcmp(child->class_name, "pcm_caps")) {
+			struct tplg_attribute *caps, *dir;
+			snd_config_t *dircfg, *childcfg;
+
+			caps = tplg_get_attribute_by_name(&child->attribute_list, "capabilities");
+			dir = tplg_get_attribute_by_name(&child->attribute_list, "direction");
+
+			ret = snd_config_make_add(&dircfg, dir->value.string,
+						  SND_CONFIG_TYPE_COMPOUND, pcm);
+			if (ret < 0) {
+				SNDERR("Error creating fe dai id for %s\n", object->name);
+				return ret;
+			}
+
+			ret = snd_config_make_add(&childcfg, "capabilities",
+						  SND_CONFIG_TYPE_STRING, dircfg);
+			if (ret < 0) {
+				SNDERR("Error creating capabilities cfg id for %s\n",
+				       object->name);
+				return ret;
+			}
+
+			ret = snd_config_set_string(childcfg, caps->value.string);
+			if (ret < 0) {
+				SNDERR("Error setting fe dai config for %s\n", object->name);
+				return ret;
+			}
+		}
+	}
+
+	ret = tplg_pp_add_object_data(tplg_pp, object, pcm_cfg);
+	if (ret < 0)
+		SNDERR("Failed to add data section for PCM %s\n", object->name);
+
+	return ret;
+}
