@@ -306,6 +306,7 @@ static const struct build_function_map object_build_map[] = {
 	{SND_TPLG_CLASS_TYPE_BASE, "tlv", &tplg_pp_build_tlv_object},
 	{SND_TPLG_CLASS_TYPE_WIDGET, "", &tplg_build_widget_object},
 	{SND_TPLG_CLASS_TYPE_CONTROL, "mixer", &tplg_build_mixer_control},
+	{SND_TPLG_CLASS_TYPE_CONTROL, "bytes", &tplg_build_bytes_control},
 };
 
 static build_func tplg_pp_lookup_object_build_func(struct tplg_object *object)

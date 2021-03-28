@@ -418,6 +418,179 @@ int tplg_build_mixer_control(struct tplg_pre_processor *tplg_pp, struct tplg_obj
 	return tplg_build_mixer_control_child_objects(object, mixer_cfg);
 }
 
+/* create new mixer config template */
+static int tplg_pp_create_bytes_config(snd_config_t *parent, char *name, int pipeline_id)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make_add(&top, name, SND_CONFIG_TYPE_COMPOUND, parent);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "index", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = snd_config_set_integer(child, pipeline_id);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "base", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "num_regs", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "mask", SND_CONFIG_TYPE_COMPOUND, top);
+
+	return ret;
+}
+
+static int tplg_build_bytes_control_child_objects(struct tplg_object *object,
+						  snd_config_t *bytes_cfg)
+{
+	snd_config_t *ops, *ext_ops, *data, *dst, *child_cfg;
+	struct tplg_object *child;
+	int ret, i = 0;
+
+	/* add ops config node */
+	ret = snd_config_make_add(&ops, "ops", SND_CONFIG_TYPE_COMPOUND,
+				  bytes_cfg);
+	if (ret < 0) {
+		SNDERR("Error creating ops config for %s\n", object->name);
+		return ret;
+	}
+
+	/* add ext_ops config node */
+	ret = snd_config_make_add(&ext_ops, "ext_ops", SND_CONFIG_TYPE_COMPOUND,
+				  bytes_cfg);
+	if (ret < 0) {
+		SNDERR("Error creating ext_ops config for %s\n", object->name);
+		return ret;
+	}
+
+	/* add data config node */
+	ret = snd_config_make_add(&data, "data", SND_CONFIG_TYPE_COMPOUND,
+				  bytes_cfg);
+	if (ret < 0) {
+		SNDERR("Error creating data config for %s\n", object->name);
+		return ret;
+	}
+
+	/* parse ops, ext_ops and data from child objects */
+	list_for_each_entry(child, &object->object_list, list) {
+		const char *id;
+
+		if (!child->cfg)
+			continue;
+
+		if (snd_config_get_id(child->cfg, &id) < 0)
+				continue;
+
+		/* copy ops node */
+		if (!strcmp(child->class_name, "ops") ||
+		    !strcmp(child->class_name, "ext_ops")) {
+			ret = snd_config_copy(&dst, child->cfg);
+			if (ret < 0) {
+				SNDERR("Error copying ops node %s for '%s'\n", id, object->name);
+				return ret;
+			}
+
+			if (!strcmp(child->class_name, "ops"))
+				ret = snd_config_add(ops, dst);
+			else
+				ret = snd_config_add(ext_ops, dst);
+			if (ret < 0) {
+				SNDERR("Error adding ops node %s for %s\n", id, object->name);
+				return ret;
+			}
+			continue;
+		}
+
+		/* add and set data references */
+		if (!strcmp(child->class_name, "data")) {
+			struct tplg_attribute *child_name;
+			char data_id[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+
+			snprintf(data_id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%d", i++);
+			ret = snd_config_make_add(&child_cfg, data_id,
+						  SND_CONFIG_TYPE_STRING, bytes_cfg);
+			if (ret < 0) {
+				SNDERR("Error creating data reference config for %s\n",
+				       object->name);
+				return ret;
+			}
+
+			child_name = tplg_get_attribute_by_name(&child->attribute_list, "name");
+			ret = snd_config_set_string(child_cfg, child_name->value.string);
+			if (ret < 0) {
+				SNDERR("Error setting tlv config for %s\n", object->name);
+				return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
+int tplg_build_bytes_control(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct tplg_attribute *attr, *name, *pipeline_id;
+	snd_config_t *top, *bytes_cfg;
+	int ret;
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	/* skip byte controls with no names */
+	if (!strcmp(name->value.string, ""))
+		return 0;
+
+	tplg_pp_debug("Building Bytes Control object: '%s' ...", object->name);
+
+	pipeline_id = tplg_get_attribute_by_name(&object->attribute_list, "pipeline_id");
+
+	/* get top-level SectionControlMixer config */
+	ret = snd_config_search(tplg_pp->cfg, "SectionControlBytes", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionControlBytes",
+					  SND_CONFIG_TYPE_COMPOUND, tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Error creating SectionControlBytes config\n");
+			return ret;
+		}
+	}
+
+	/* create bytes config */
+	ret = tplg_pp_create_bytes_config(top, name->value.string, pipeline_id->value.integer);
+	if (ret < 0) {
+		SNDERR("Error creating bytes config for %s\n", object->name);
+		return ret;
+	}
+
+	bytes_cfg = tplg_find_config(top, name->value.string);
+	if (!bytes_cfg) {
+		SNDERR("Can't find bytes config %s\n", object->name);
+		return -EINVAL;
+	}
+
+	/* update bytes config */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+
+		/* don't update index */
+		if (!strcmp(attr->name, "index"))
+			continue;
+
+		ret = tplg_attribute_config_update(bytes_cfg, attr);
+		if (ret < 0) {
+			SNDERR("failed to add config for attribute %s in bytes %s\n",
+			       attr->name, object->name);
+			return ret;
+		}
+	}
+	return tplg_build_bytes_control_child_objects(object, bytes_cfg);
+}
+
 int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
 {
 	struct tplg_attribute *pipeline_id, *attr, *name;
