@@ -332,6 +332,187 @@ err:
 	return ret;
 }
 
+static int tplg_pp_save_control_bytes(struct tplg_pre_processor *tplg_pp,
+				      struct tplg_object *object,
+				      struct snd_soc_tplg_bytes_control *be, int index)
+{
+	struct tplg_object *child;
+	int ret;
+
+	/* save the SectionControlMixer and its fields */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionControlBytes.");
+	if (ret < 0)
+		return ret;
+
+	ret =  snd_soc_tplg_save_control_bytes_params(&tplg_pp->buf, be, be->hdr.name, index, "");
+	if (ret < 0)
+		return ret;
+
+	/* parse the rest from child objects */
+	list_for_each_entry(child, &object->object_list, list) {
+		if (!object->cfg)
+			continue;
+
+		/* save ops */
+		if (!strcmp(child->class_name, "ops")) {
+			ret = snd_soc_tplg_save_ops(NULL, &be->hdr, &tplg_pp->buf, "\t");
+			if (ret < 0) {
+				SNDERR("Error saving ops for mixer %s\n", object->name);
+				return ret;
+			}
+			continue;
+		}
+
+		/* save ext ops */
+		if (!strcmp(child->class_name, "ext_ops")) {
+			ret = snd_soc_tplg_save_ext_ops(NULL, be, &tplg_pp->buf, "\t");
+			if (ret < 0) {
+				SNDERR("Error saving ops for mixer %s\n", object->name);
+				return ret;
+			}
+			continue;
+		}
+
+		/* save tlv */
+		if (!strcmp(child->class_name, "tlv")) {
+			struct tplg_attribute *name;
+
+			name = tplg_get_attribute_by_name(&child->attribute_list, "name");
+			ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\ttlv\t\"%s\"\n",
+						    name->value.string);
+			if (ret < 0)
+				return ret;
+			continue;
+		}
+	}
+
+	ret = snd_soc_tplg_save_access(NULL, &be->hdr, &tplg_pp->buf, "\t");
+	if (ret < 0) {
+		SNDERR("Error saving access for bytes control %s\n", object->name);
+		return ret;
+	}
+
+	/* Add data references */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\tdata[\n");
+	if (ret < 0)
+		return ret;
+	list_for_each_entry(child, &object->object_list, list) {
+		if (!object->cfg)
+			continue;
+
+		if (!strcmp(child->class_name, "data")) {
+			struct tplg_attribute *name;
+
+			name = tplg_get_attribute_by_name(&child->attribute_list, "name");
+			ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t\"%s\"\n",
+						    name->value.string);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t]\n}\n\n");
+	if (ret < 0)
+		return ret;
+
+	print_pre_processed_config(tplg_pp);
+
+	return 0;
+}
+
+int tplg_build_bytes_control(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct snd_soc_tplg_bytes_control *be;
+	struct snd_soc_tplg_ctl_hdr *hdr;
+	struct tplg_attribute *attr, *name, *pipeline_id;
+	struct tplg_object *child;
+	bool access_set = false;
+	int ret;
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	/* skip byte controls with no names */
+	if (!strcmp(name->value.string, ""))
+		return 0;
+
+	tplg_pp_debug("Building Bytes Control object: '%s' ...", object->name);
+
+	pipeline_id = tplg_get_attribute_by_name(&object->attribute_list, "pipeline_id");
+
+	/* init new byte control */
+	be = calloc(1, sizeof(*be));
+	if (!be)
+		return -ENOMEM;
+
+	snd_strlcpy(be->hdr.name, name->value.string, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	be->hdr.type = SND_SOC_TPLG_TYPE_BYTES;
+	be->size = sizeof(*be);
+	hdr = &be->hdr;
+
+	/* parse some control params from attributes */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+		if (!attr->cfg)
+			continue;
+
+		ret = snd_soc_tplg_parse_control_bytes_param(attr->cfg, be);
+		if (ret < 0) {
+			SNDERR("Error parsing control bytes params for %s\n", object->name);
+			goto err;
+		}
+
+		if (!strcmp(attr->name, "access")) {
+			ret = snd_soc_tplg_parse_access_values(attr->cfg, &be->hdr);
+			if (ret < 0) {
+				SNDERR("Error parsing access attribute for %s\n", object->name);
+				goto err;
+			}
+			access_set = true;
+		}
+	}
+
+	/* parse the rest from child objects */
+	list_for_each_entry(child, &object->object_list, list) {
+		if (!child->cfg)
+			continue;
+
+		if (!strcmp(child->class_name, "ops")) {
+			ret = snd_soc_tplg_parse_ops(NULL, child->cfg, hdr);
+			if (ret < 0) {
+				SNDERR("Error parsing ops for mixer %s\n", object->name);
+				goto err;
+			}
+			continue;
+		}
+
+		if (!strcmp(child->class_name, "extops")) {
+			ret = snd_soc_tplg_parse_ext_ops(NULL, child->cfg, hdr);
+			if (ret < 0) {
+				SNDERR("Error parsing ext ops for bytes %s\n", object->name);
+				goto err;
+			}
+			continue;
+		}
+	}
+
+	tplg_pp_debug("Bytes: %s Ops info: %d get: %d put: %d", hdr->name, hdr->ops.info,
+		      hdr->ops.get, hdr->ops.put);
+	tplg_pp_debug("Ext Ops info: %d get: %d put: %d", be->ext_ops.info, be->ext_ops.get,
+		      be->ext_ops.put);
+
+	/* set CTL access to default values if none provided */
+	if (!access_set)
+		be->hdr.access = SNDRV_CTL_ELEM_ACCESS_READWRITE;
+
+	/* Build complete. Now save to tplg_pp->buf */
+	ret = tplg_pp_save_control_bytes(tplg_pp, object, be, pipeline_id->value.integer);
+	if (ret < 0)
+		SNDERR("Failed to save control bytes %s\n", be->hdr.name);
+
+err:
+	free(be);
+	return ret;
+}
+
 static int tplg_add_object_controls(struct tplg_pre_processor *tplg_pp,
 				    struct tplg_object *object)
 {
@@ -355,6 +536,33 @@ static int tplg_add_object_controls(struct tplg_pre_processor *tplg_pp,
 			continue;
 
 		if (!strcmp(child->class_name, "mixer")) {
+			ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t\"%s\"\n",
+						   name_attr->value.string);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t]\n");
+	if (ret < 0)
+		return ret;
+	/* add mixer controls */
+
+	/* save the bytes references */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\tbytes [\n");
+	if (ret < 0)
+		return ret;
+	list_for_each_entry(child, &object->object_list, list) {
+		struct tplg_attribute *name_attr;
+
+		/* skip if no name is provided */
+		name_attr = tplg_get_attribute_by_name(&child->attribute_list,
+							"name");
+
+		if (!name_attr || !strcmp(name_attr->value.string, ""))
+			continue;
+
+		if (!strcmp(child->class_name, "bytes")) {
 			ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t\"%s\"\n",
 						   name_attr->value.string);
 			if (ret < 0)
