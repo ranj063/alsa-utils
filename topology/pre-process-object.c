@@ -307,6 +307,7 @@ static const struct build_function_map object_build_map[] = {
 	{SND_TPLG_CLASS_TYPE_WIDGET, "", &tplg_build_widget_object},
 	{SND_TPLG_CLASS_TYPE_CONTROL, "mixer", &tplg_build_mixer_control},
 	{SND_TPLG_CLASS_TYPE_CONTROL, "bytes", &tplg_build_bytes_control},
+	{SND_TPLG_CLASS_TYPE_DAI, "", &tplg_build_dai_object},
 };
 
 static build_func tplg_pp_lookup_object_build_func(struct tplg_object *object)
@@ -316,6 +317,10 @@ static build_func tplg_pp_lookup_object_build_func(struct tplg_object *object)
 	for (i = 0; i < ARRAY_SIZE(object_build_map); i++) {
 		if (object->type == SND_TPLG_CLASS_TYPE_WIDGET &&
 		    object_build_map[i].class_type == SND_TPLG_CLASS_TYPE_WIDGET)
+			return object_build_map[i].builder;
+
+		if (object->type == SND_TPLG_CLASS_TYPE_DAI &&
+		    object_build_map[i].class_type == SND_TPLG_CLASS_TYPE_DAI)
 			return object_build_map[i].builder;
 
 		/* for SND_TPLG_CLASS_TYPE_BASE type objects, also match the object->class_name */
