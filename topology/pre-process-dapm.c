@@ -200,6 +200,224 @@ int tplg_pp_build_tlv_object(struct tplg_pre_processor *tplg_pp,
 	return 0;
 }
 
+/* create new channel config template */
+static int tplg_pp_create_channel_config(snd_config_t *parent, char *name)
+{
+	snd_config_t *ctop, *child;
+	int ret;
+
+	ret = snd_config_make_add(&ctop, name, SND_CONFIG_TYPE_COMPOUND, parent);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "reg", SND_CONFIG_TYPE_INTEGER, ctop);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "shift", SND_CONFIG_TYPE_INTEGER, ctop);
+
+	return ret;
+}
+
+static int tplg_build_mixer_channels(struct tplg_object *object,
+				     snd_config_t *mixer_cfg)
+{
+	snd_config_t *channel;
+	struct tplg_object *child;
+	int ret;
+
+	/* add channel config node */
+	ret = snd_config_make_add(&channel, "channel", SND_CONFIG_TYPE_COMPOUND,
+				  mixer_cfg);
+	if (ret < 0) {
+		SNDERR("Error creating channel config for %s\n", object->name);
+		return ret;
+	}
+
+	list_for_each_entry(child, &object->object_list, list) {
+		struct tplg_attribute *attr;
+		snd_config_t *ctop;
+		
+		if (!child->cfg || strcmp(child->class_name, "channel"))
+			continue;
+
+		/* create new channel config template */
+		attr = tplg_get_attribute_by_name(&child->attribute_list, "name");
+		ret = tplg_pp_create_channel_config(channel, attr->value.string);
+		if (ret < 0) {
+			SNDERR("Failed to create channel config %s for %s\n",
+			       attr->value.string, object->name);
+		}
+
+		ctop = tplg_find_config(channel, attr->value.string);
+		if (!ctop) {
+			SNDERR("Can't find channel config %s for %s\n",
+			       attr->value.string, object->name);
+			return -ENOENT;
+		}
+
+		/* update the reg/shift values in the channel */
+		list_for_each_entry(attr, &child->attribute_list, list) {
+			ret = tplg_attribute_config_update(ctop, attr);
+			if (ret < 0) {
+				SNDERR("failed to add config for attribute %s in channel %s\n",
+				       attr->name, object->name);
+				return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static int tplg_build_mixer_control_child_objects(struct tplg_object *object,
+						  snd_config_t *mixer_cfg)
+{
+	snd_config_t *ops, *dst, *child_cfg;
+	struct tplg_object *child;
+	int ret;
+
+	/* add ops config node */
+	ret = snd_config_make_add(&ops, "ops", SND_CONFIG_TYPE_COMPOUND,
+				  mixer_cfg);
+	if (ret < 0) {
+		SNDERR("Error creating ops config for %s\n", object->name);
+		return ret;
+	}
+
+	/* parse ops, tlv and channel from child objects */
+	list_for_each_entry(child, &object->object_list, list) {
+		const char *id;
+
+		if (!child->cfg)
+			continue;
+
+		if (snd_config_get_id(child->cfg, &id) < 0)
+				continue;
+
+		/* copy ops node */
+		if (!strcmp(child->class_name, "ops")) {
+			ret = snd_config_copy(&dst, child->cfg);
+			if (ret < 0) {
+				SNDERR("Error copying ops node %s for '%s'\n", id, object->name);
+				return ret;
+			}
+
+			ret = snd_config_add(ops, dst);
+			if (ret < 0) {
+				SNDERR("Error adding ops node %s for %s\n", id, object->name);
+				return ret;
+			}
+			continue;
+		}
+
+		/* add and set tlv node */
+		if (!strcmp(child->class_name, "tlv")) {
+			struct tplg_attribute *child_name;
+
+			child_name = tplg_get_attribute_by_name(&child->attribute_list, "name");
+			ret = snd_config_make_add(&child_cfg, "tlv",
+						  SND_CONFIG_TYPE_STRING, mixer_cfg);
+			if (ret < 0) {
+				SNDERR("Error creating tlv config for %s\n",
+				       object->name);
+				return ret;
+			}
+
+			ret = snd_config_set_string(child_cfg, child_name->value.string);
+			if (ret < 0) {
+				SNDERR("Error setting tlv config for %s\n", object->name);
+				return ret;
+			}
+		}
+	}
+
+	return tplg_build_mixer_channels(object, mixer_cfg);
+}
+
+/* create new mixer config template */
+static int tplg_pp_create_mixer_config(snd_config_t *parent, char *name, int pipeline_id)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make_add(&top, name, SND_CONFIG_TYPE_COMPOUND, parent);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "index", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = snd_config_set_integer(child, pipeline_id);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "invert", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = snd_config_make_add(&child, "access", SND_CONFIG_TYPE_COMPOUND, top);
+
+	return ret;
+}
+
+
+int tplg_build_mixer_control(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct tplg_attribute *attr, *name, *pipeline_id;
+	snd_config_t *top, *mixer_cfg;
+	int ret;
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	/* skip mixers with no names */
+	if (!strcmp(name->value.string, ""))
+		return 0;
+
+	tplg_pp_debug("Building Mixer Control object: '%s' ...", object->name);
+
+	pipeline_id = tplg_get_attribute_by_name(&object->attribute_list, "pipeline_id");
+
+	/* get top-level SectionControlMixer config */
+	ret = snd_config_search(tplg_pp->cfg, "SectionControlMixer", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionControlMixer",
+					  SND_CONFIG_TYPE_COMPOUND, tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Error creating SectionControlMixer config\n");
+			return ret;
+		}
+	}
+
+	/* create mixer config */
+	ret = tplg_pp_create_mixer_config(top, name->value.string, pipeline_id->value.integer);
+	if (ret < 0) {
+		SNDERR("Error creating mixer config for %s\n", object->name);
+		return ret;
+	}
+
+	mixer_cfg = tplg_find_config(top, name->value.string);
+	if (!mixer_cfg) {
+		SNDERR("Can't find mixer config %s\n", object->name);
+		return -EINVAL;
+	}
+
+	/* update mixer config */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+
+		/* don't update index */
+		if (!strcmp(attr->name, "index"))
+			continue;
+
+		ret = tplg_attribute_config_update(mixer_cfg, attr);
+		if (ret < 0) {
+			SNDERR("failed to add config for attribute %s in mixer %s\n",
+			       attr->name, object->name);
+			return ret;
+		}
+	}
+
+	return tplg_build_mixer_control_child_objects(object, mixer_cfg);
+}
+
 int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
 {
 	struct tplg_attribute *pipeline_id, *attr, *name;
