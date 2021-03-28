@@ -145,4 +145,6 @@ int tplg_build_mixer_control(struct tplg_pre_processor *tplg_pp, struct tplg_obj
 int tplg_build_bytes_control(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
 int tplg_build_dai_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
 int tplg_pp_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object);
+int tplg_build_pcm_object(struct tplg_pre_processor *tplg_pp,
+			 struct tplg_object *object);
 #endif

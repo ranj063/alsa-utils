@@ -161,3 +161,96 @@ err:
 	free(link);
 	return 0;
 }
+
+int tplg_build_pcm_object(struct tplg_pre_processor *tplg_pp,
+			 struct tplg_object *object)
+{
+	struct tplg_attribute *name, *attr;
+	struct snd_soc_tplg_pcm *pcm;
+	struct tplg_object *child;
+	unsigned int streams[2];
+	int ret;
+
+	pcm = calloc(1, sizeof(*pcm));
+	if (!pcm)
+		return -ENOMEM;
+
+	pcm->size = sizeof(*pcm);
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	/* parse PCM params */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+		if (!attr->cfg)
+			continue;
+
+		ret = snd_soc_tplg_parse_pcm_param(attr->cfg, pcm);
+		if (ret < 0) {
+			SNDERR("Failed to parse PCM %s\n", object->name);
+			goto err;
+		}
+	}
+
+	/* parse PCM params */
+	list_for_each_entry(child, &object->object_list, list) {
+		if (!child->cfg)
+			continue;
+
+		if (!strcmp(child->class_name, "fe_dai")) {
+			ret = snd_soc_tplg_parse_fe_dai(child->cfg, pcm);
+			if (ret < 0) {
+				SNDERR("Failed to parse FE DAI for PCM %s\n", object->name);
+				goto err;
+			}
+		}
+
+		if (!strcmp(child->class_name, "pcm_caps")) {
+			ret = snd_soc_tplg_parse_streams_param(child->cfg, pcm->caps,
+							       &pcm->playback, &pcm->capture);
+			if (ret < 0) {
+				SNDERR("Failed to parse stream caps for PCM %s\n", object->name);
+				goto err;
+			}
+		}
+	}
+
+	snd_strlcpy(pcm->pcm_name, name->value.string, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	tplg_pp_debug(" PCM: %s ID: %d dai_name: %s", pcm->pcm_name, pcm->dai_id, pcm->dai_name);
+	tplg_pp_debug(" PCM: %s playback: %d capture %d", pcm->pcm_name, pcm->playback, pcm->capture);
+
+	/* Save the SectionPCM */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionPCM.");
+	if (ret < 0)
+		goto err;
+
+	/* save PCM params */
+	ret = snd_soc_tplg_save_pcm_param(pcm, pcm->pcm_name, 0, &tplg_pp->buf, "");
+	if (ret < 0) {
+		SNDERR("Failed to save PCM %s\n", pcm->pcm_name);
+		goto err;
+	}
+
+	/* save the FE DAI */
+	ret = snd_soc_tplg_save_fe_dai(pcm, &tplg_pp->buf, "\t");
+	if (ret < 0) {
+		SNDERR("Failed to save FE DAI for PCM: '%s'\n", pcm->pcm_name);
+		goto err;
+	}
+
+	/* save the capabilities */
+	streams[0] = pcm->playback;
+	streams[1] = pcm->capture;
+	ret = snd_soc_tplg_save_streams_param(pcm->caps, streams, &tplg_pp->buf, "\t");
+	if (ret < 0) {
+		SNDERR("Failed to save FE DAI for PCM: '%s'\n", pcm->pcm_name);
+		goto err;
+	}
+
+	ret = tplg_pp_add_object_data(tplg_pp, object);
+	if (ret < 0)
+		SNDERR("Failed to add data section for PCM %s\n", pcm->pcm_name);
+
+err:
+	free(pcm);
+	return ret;
+}
