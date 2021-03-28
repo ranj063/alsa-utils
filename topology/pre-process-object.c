@@ -303,6 +303,7 @@ static const struct build_function_map object_build_map[] = {
 	{SND_TPLG_CLASS_TYPE_BASE, "data", &tplg_build_data_object},
 	{SND_TPLG_CLASS_TYPE_BASE, "manifest", &tplg_build_manifest_object},
 	{SND_TPLG_CLASS_TYPE_BASE, "VendorToken", &tplg_build_vendor_token_object},
+	{SND_TPLG_CLASS_TYPE_BASE, "tlv", &tplg_pp_build_tlv_object},
 	{SND_TPLG_CLASS_TYPE_WIDGET, "", &tplg_build_widget_object},
 };
 
