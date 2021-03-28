@@ -35,6 +35,57 @@
 #include "pre-processor.h"
 #include "../alsactl/list.h"
 
+int tplg_pp_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct snd_soc_tplg_hw_config *hw_cfg;
+	struct tplg_attribute *attr, *id;
+	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	int ret;
+
+	hw_cfg = calloc(1, sizeof(*hw_cfg));
+	if (!hw_cfg)
+		return -ENOMEM;
+
+	tplg_pp_debug("Building SectionHWConfig for: '%s' ...", object->name);
+	id = tplg_get_attribute_by_name(&object->attribute_list, "id");
+
+	/* parse hw_config params from attributes */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+		if (!attr->cfg)
+			continue;
+
+		ret = snd_soc_tplg_set_hw_config_param(attr->cfg, hw_cfg);
+		if (ret < 0) {
+			SNDERR("Error parsing hw_config params for object %s\n",
+			       object->name);
+			goto err;
+		}
+	}
+
+	ret = snprintf(name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s.hwcfg.%ld",
+		       object->parent->name, id->value.integer);
+	if (ret > SNDRV_CTL_ELEM_ID_NAME_MAXLEN) {
+		SNDERR("hw_cfg name too long %s\n", name);
+		ret = -EINVAL;
+		goto err;
+	}
+
+	/* save hw_params */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionHWConfig.");
+	if (ret < 0)
+		goto err;
+
+	ret = snd_soc_tplg_save_hw_config(hw_cfg, name, &tplg_pp->buf, "");
+	if (ret < 0)
+		SNDERR("Failed to save hw_cfg %s\n", name);
+
+	print_pre_processed_config(tplg_pp);
+
+err:
+	free(hw_cfg);
+	return ret;
+}
+
 int tplg_build_dai_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
 {
 	struct snd_soc_tplg_link_config *link;
