@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <alsa/sound/uapi/tlv.h>
 #include <alsa/input.h>
 #include <alsa/output.h>
 #include <alsa/conf.h>
@@ -34,6 +35,83 @@
 #include "topology.h"
 #include "pre-processor.h"
 #include "../alsactl/list.h"
+
+static int tplg_pp_parse_tlv(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
+{
+	struct snd_soc_tplg_ctl_tlv *tplg_tlv;
+	struct snd_soc_tplg_tlv_dbscale *scale;
+	struct tplg_attribute *attr, *name;
+	struct list_head *pos;
+	int ret;
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+
+	tplg_tlv = calloc(1, sizeof(*tplg_tlv));
+	if (!tplg_tlv)
+		return -ENOMEM;
+
+	tplg_tlv->size = sizeof(*tplg_tlv);
+	tplg_tlv->type = SNDRV_CTL_TLVT_DB_SCALE;
+	scale = &tplg_tlv->scale;
+
+	list_for_each(pos, &object->object_list) {
+		struct tplg_object *child = list_entry(pos, struct tplg_object, list);
+
+		if (!strcmp(child->class_name, "scale")) {
+			list_for_each_entry(attr, &child->attribute_list, list) {
+				if (!attr->cfg)
+					continue;
+
+				ret = snd_soc_tplg_parse_tlv_dbscale_param(attr->cfg, scale);
+				if (ret < 0) {
+					SNDERR("failed to DBScale for tlv %s", object->name);
+					goto err;;
+				}
+			}
+			break;
+		}
+	}
+
+	tplg_pp_debug("TLV: %s scale min: %d step %d mute %d", object->name, scale->min,
+		      scale->step, scale->mute);
+
+	ret = snd_soc_tplg_save_tlv(tplg_tlv, &tplg_pp->buf, name->value.string, "");
+	if (ret < 0)
+		SNDERR("failed to save %s", object->name);
+
+err:
+	free(tplg_tlv);
+	return ret;
+}
+
+int tplg_pp_build_tlv_object(struct tplg_pre_processor *tplg_pp,
+			     struct tplg_object *object)
+{
+	struct tplg_attribute *name;
+	int ret;
+
+	tplg_pp_debug("Building TLV Section for: '%s' ...", object->name);
+
+	name = tplg_get_attribute_by_name(&object->attribute_list, "name");
+	/* save the SectionControlMixer and its fields */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionTLV.", name->value.string);
+	if (ret < 0)
+		return ret;
+
+	ret = tplg_pp_parse_tlv(tplg_pp, object);
+	if (ret < 0) {
+		SNDERR("Error parsing tlv for mixer %s\n", object->name);
+		return ret;
+	}
+
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\n");
+	if (ret < 0)
+		return ret;
+
+	print_pre_processed_config(tplg_pp);
+
+	return 0;
+}
 
 int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_object *object)
 {
