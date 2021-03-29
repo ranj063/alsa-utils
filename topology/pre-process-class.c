@@ -293,6 +293,107 @@ static int tplg_parse_class_attributes(struct tplg_pre_processor *tplg_pp,
 	return 0;
 }
 
+/* helper function to get an attribute by name */
+struct tplg_attribute *tplg_get_attribute_by_name(struct list_head *list, const char *name)
+{
+	struct list_head *pos;
+
+	list_for_each(pos, list) {
+		struct tplg_attribute *attr = list_entry(pos, struct tplg_attribute, list);
+
+		if (!strcmp(attr->name, name))
+			return attr;
+	}
+
+	return NULL;
+}
+
+/* apply the category mask to the all attributes */
+static int tplg_parse_class_attribute_category(snd_config_t *cfg, struct tplg_class *class,
+					       int category)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+
+	snd_config_for_each(i, next, cfg) {
+		struct tplg_attribute *attr;
+		const char *id;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_string(n, &id) < 0) {
+			SNDERR("invalid attribute category name for class %s\n", class->name);
+			return -EINVAL;
+		}
+
+		attr = tplg_get_attribute_by_name(&class->attribute_list, id);
+		if (!attr)
+			continue;
+
+		attr->constraint.mask |= category;
+	}
+
+	return 0;
+}
+
+/*
+ * At the end of class attribute definitions, there could be section categorizing attributes
+ * as mandatory, immutable or deprecated etc. Parse these and apply them to the attribute
+ * constraint.
+ */
+static int tplg_parse_class_attribute_categories(snd_config_t *cfg, struct tplg_class *class)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	int category = 0;
+	int ret;
+
+	snd_config_for_each(i, next, cfg) {
+		const char *id;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0) {
+			SNDERR("invalid attribute category for class %s\n", class->name);
+			return -EINVAL;
+		}
+
+		if (!strcmp(id, "mandatory"))
+			category = TPLG_CLASS_ATTRIBUTE_MASK_MANDATORY;
+
+		if (!strcmp(id, "immutable"))
+			category = TPLG_CLASS_ATTRIBUTE_MASK_IMMUTABLE;
+
+		if (!strcmp(id, "deprecated"))
+			category = TPLG_CLASS_ATTRIBUTE_MASK_DEPRECATED;
+
+		if (!strcmp(id, "automatic"))
+			category = TPLG_CLASS_ATTRIBUTE_MASK_AUTOMATIC;
+
+		if (!strcmp(id, "unique")) {
+			struct tplg_attribute *unique_attr;
+			const char *s;
+			int err = snd_config_get_string(n, &s);
+			assert(err >= 0);
+
+			unique_attr = tplg_get_attribute_by_name(&class->attribute_list, s);
+			if (!unique_attr)
+				continue;
+
+			unique_attr->constraint.mask |= TPLG_CLASS_ATTRIBUTE_MASK_UNIQUE;
+			continue;
+		}
+
+		if (!category)
+			continue;
+
+		/* apply the constraint to all attributes belong to the category */
+		ret = tplg_parse_class_attribute_category(n, class, category);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int tplg_define_class(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, int type)
 {
 	snd_config_iterator_t i, next;
@@ -346,6 +447,16 @@ static int tplg_define_class(struct tplg_pre_processor *tplg_pp, snd_config_t *c
 				SNDERR("failed to parse attributes for class %s\n", class->name);
 				return ret;
 			}
+		}
+
+		/* parse attribute constraint category and apply the constraint */
+		if (!strcmp(id, "attributes")) {
+			ret = tplg_parse_class_attribute_categories(n, class);
+			if (ret < 0) {
+				SNDERR("failed to parse attributes for class %s\n", class->name);
+				return ret;
+			}
+			continue;
 		}
 	}
 
