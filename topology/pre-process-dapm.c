@@ -633,3 +633,148 @@ err:
 	free(widget);
 	return ret;
 }
+
+/*
+ * Widget names for pipeline endpoints can be of the following type:
+ * "Object.class.index" which refers to an object of class "class" with index in the
+ * parent object_list or the global topology object_list
+ */
+static char *tplg_pp_get_widget_name(struct tplg_pre_processor *tplg_pp,
+				     struct tplg_object *object,
+				     char *string)
+{
+	struct tplg_object *child;
+	struct list_head *list;
+	char *object_str, *last_dot;
+	char class_name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN], *index_str;
+
+	/* strip "Object." from the string */
+	object_str = strchr(string, '.');
+	if (!object_str) {
+		SNDERR("Incomplete widget name '%s'\n", string);
+		return NULL;
+	}
+
+	/* get last occurence of '.' */
+	last_dot = strrchr(string, '.');
+
+	/* get index of object */
+	index_str = strchr(object_str + 1, '.');
+	if (!index_str) {
+		SNDERR("No unique attribute for widget_name %s\n",
+		       string);
+		return NULL;
+	}
+
+	/* get class name */
+	snd_strlcpy(class_name, object_str + 1, strlen(object_str) - strlen(index_str));
+
+	/*
+	 * look up widget from parent object_list or the global object list if
+	 * this is a route object. For all other objects, search for widget in its object_list.
+	 */
+	if (!strcmp(object->class_name, "route")) {
+		if (object->parent)
+			list = &object->parent->object_list;
+		else
+			list = &tplg_pp->object_list;
+	} else {
+		list = &object->object_list;
+	}
+
+	child = tplg_object_lookup_in_list(list, class_name, index_str + 1);
+	if (!child) {
+		SNDERR("Widget %s%s not found \n", class_name, index_str);
+		return NULL;
+	}
+
+	/* end of string? */
+	if (last_dot != index_str) {
+		char *str = strchr(index_str + 1, '.');
+		char new_str[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+
+		snprintf(new_str, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s%s", "Object", str);
+
+		return tplg_pp_get_widget_name(tplg_pp, child, new_str);
+	}
+
+	return child->name;
+}
+
+int tplg_build_dapm_route_object(struct tplg_pre_processor *tplg_pp,
+				 struct tplg_object *object)
+{
+	struct snd_soc_tplg_dapm_graph_elem *line;
+	struct tplg_attribute *attr, *pipeline_id, *index;
+	int ret = 0;
+
+	line = calloc(1, sizeof(*line));
+	if (!line)
+		return -ENOMEM;
+
+	tplg_pp_debug("Building DAPM route object: '%s' ...", object->name);
+
+	pipeline_id = tplg_get_attribute_by_name(&object->attribute_list, "pipeline_id");
+	index = tplg_get_attribute_by_name(&object->attribute_list, "index");
+
+	/* Parse connection object and get widget names for source and sink */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+		char *dest, *widget_name;
+
+		if (!strcmp(attr->name, "control")) {
+			snd_strlcpy(line->control, attr->value.string,
+				    SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			continue;
+		}
+
+		if (!strcmp(attr->name, "source"))
+			dest = line->source;
+		else if (!strcmp(attr->name, "sink"))
+			dest = line->sink;
+		else
+			continue;
+
+		widget_name = tplg_pp_get_widget_name(tplg_pp, object, attr->value.string);
+		if (!widget_name) {
+			SNDERR("Failed to find widget '%s' for route %s\n", attr->value.string,
+			      object->name);
+			ret = -EINVAL;
+			goto err;
+		}
+
+		snd_strlcpy(dest, widget_name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	}
+
+	/* save SectionGraph */
+	if (object->parent)
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "",
+					    "SectionGraph.\"%s.route.%d\" {\n",
+					    object->parent->name, index->value.integer);
+	else
+		ret = snd_tplg_save_printf(&tplg_pp->buf, "",
+					    "SectionGraph.\"%s.route.%d\" {\n",
+					    "Endpoint", index->value.integer);
+	if (ret < 0)
+		goto err;
+
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "",
+				    "\tindex %d\n\tlines [\n", pipeline_id->value.integer);
+	if (ret < 0)
+		goto err;
+
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t\t\"%s, %s, %s\"\n",
+				    line->source, line->control, line->sink);
+	if (ret < 0)
+		goto err;
+
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "\t]\n}\n\n");
+	if (ret < 0)
+		goto err;
+
+	tplg_pp_debug("DAPM route: %s -> %s -> %s", line->source, line->control, line->sink);
+	print_pre_processed_config(tplg_pp);
+
+err:
+	free(line);
+	return ret;
+}
