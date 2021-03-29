@@ -23,6 +23,12 @@
 #include "topology.h"
 #include "../alsactl/list.h"
 
+#define TPLG_CLASS_ATTRIBUTE_MASK_MANDATORY	1 << 1
+#define TPLG_CLASS_ATTRIBUTE_MASK_IMMUTABLE	1 << 2
+#define TPLG_CLASS_ATTRIBUTE_MASK_DEPRECATED	1 << 3
+#define TPLG_CLASS_ATTRIBUTE_MASK_AUTOMATIC	1 << 4
+#define TPLG_CLASS_ATTRIBUTE_MASK_UNIQUE	1 << 5
+
 /*
  * some attribute's have valid string values that translate to integer values. The "string"
  * field stored the human readable value and the "value" field stores the corresponding integer
