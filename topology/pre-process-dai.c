@@ -433,3 +433,101 @@ int tplg_build_pcm_object(struct tplg_pre_processor *tplg_pp,
 
 	return ret;
 }
+
+static int tplg_pp_create_pcm_caps_config(snd_config_t *parent, char *name)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make_add(&top, name, SND_CONFIG_TYPE_COMPOUND, parent);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "formats", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "rates", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "rate_min", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "rate_max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "channels_min", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "channels_max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "periods_min", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "periods_max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "period_size_min", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "period_size_max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "buffer_size_min", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "buffer_size_max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = snd_config_make_add(&child, "sig_bits", SND_CONFIG_TYPE_INTEGER, top);
+
+	return ret;
+}
+
+int tplg_build_pcm_caps_object(struct tplg_pre_processor *tplg_pp,
+			       struct tplg_object *object)
+{
+	struct tplg_attribute *attr, *capabilities;
+	snd_config_t *top, *caps;
+	int ret;
+
+	tplg_pp_debug("Building SectionPCMCapabilities for: '%s' ...", object->name);
+
+	/* get top-level SectionControlMixer config */
+	ret = snd_config_search(tplg_pp->cfg, "SectionPCMCapabilities", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionPCMCapabilities",
+					  SND_CONFIG_TYPE_COMPOUND, tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Error creating SectionPCMCapabilities config\n");
+			return ret;
+		}
+	}
+
+	capabilities = tplg_get_attribute_by_name(&object->attribute_list, "capabilities");
+	
+	/* create pcm_caps config */
+	ret = tplg_pp_create_pcm_caps_config(top, capabilities->value.string);
+	if (ret < 0) {
+		SNDERR("Error creating hw_cfg config for %s\n", object->name);
+		return ret;
+	}
+
+	caps = tplg_find_config(top, capabilities->value.string);
+	if (!caps) {
+		SNDERR("Can't find pcm_caps config %s\n", object->name);
+		return -EINVAL;
+	}
+
+	/* update pcm_caps config */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+
+		ret = tplg_attribute_config_update(caps, attr);
+		if (ret < 0) {
+			SNDERR("failed to add config for attribute %s in pcm caps %s\n",
+			       attr->name, object->name);
+			return ret;
+		}
+	}
+
+	return ret;
+}

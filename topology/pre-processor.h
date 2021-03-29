@@ -160,4 +160,6 @@ int tplg_build_pcm_object(struct tplg_pre_processor *tplg_pp,
 			 struct tplg_object *object);
 int tplg_build_dapm_route_object(struct tplg_pre_processor *tplg_pp,
 				 struct tplg_object *object);
+int tplg_build_pcm_caps_object(struct tplg_pre_processor *tplg_pp,
+			       struct tplg_object *object);
 #endif

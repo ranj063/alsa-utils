@@ -311,6 +311,7 @@ static const struct build_function_map object_build_map[] = {
 	{SND_TPLG_CLASS_TYPE_CONTROL, "bytes", &tplg_build_bytes_control},
 	{SND_TPLG_CLASS_TYPE_DAI, "", &tplg_build_dai_object},
 	{SND_TPLG_CLASS_TYPE_PCM, "pcm", &tplg_build_pcm_object},
+	{SND_TPLG_CLASS_TYPE_PCM, "pcm_caps", &tplg_build_pcm_caps_object},
 };
 
 static build_func tplg_pp_lookup_object_build_func(struct tplg_object *object)
