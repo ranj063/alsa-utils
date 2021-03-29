@@ -664,3 +664,188 @@ int tplg_build_widget_object(struct tplg_pre_processor *tplg_pp, struct tplg_obj
 
 	return ret;
 }
+
+/*
+ * Widget names for pipeline endpoints can be of the following type:
+ * "Object.class.index" which refers to an object of class "class" with index in the
+ * parent object_list or the global topology object_list
+ */
+static char *tplg_pp_get_widget_name(struct tplg_pre_processor *tplg_pp,
+				     struct tplg_object *object,
+				     char *string)
+{
+	struct tplg_object *child;
+	struct list_head *list;
+	char *object_str, *last_dot;
+	char class_name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN], *index_str;
+
+	/* strip "Object." from the string */
+	object_str = strchr(string, '.');
+	if (!object_str) {
+		SNDERR("Incomplete widget name '%s'\n", string);
+		return NULL;
+	}
+
+	/* get last occurence of '.' */
+	last_dot = strrchr(string, '.');
+
+	/* get index of object */
+	index_str = strchr(object_str + 1, '.');
+	if (!index_str) {
+		SNDERR("No unique attribute for widget_name %s\n",
+		       string);
+		return NULL;
+	}
+
+	/* get class name */
+	snd_strlcpy(class_name, object_str + 1, strlen(object_str) - strlen(index_str));
+
+	/*
+	 * look up widget from parent object_list or the global object list if
+	 * this is a route object. For all other objects, search for widget in its object_list.
+	 */
+	if (!strcmp(object->class_name, "route")) {
+		if (object->parent)
+			list = &object->parent->object_list;
+		else
+			list = &tplg_pp->object_list;
+	} else {
+		list = &object->object_list;
+	}
+
+	child = tplg_object_lookup_in_list(list, class_name, index_str + 1);
+	if (!child) {
+		SNDERR("Widget %s%s not found \n", class_name, index_str);
+		return NULL;
+	}
+
+	/* end of string? */
+	if (last_dot != index_str) {
+		char *str = strchr(index_str + 1, '.');
+		char new_str[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+
+		snprintf(new_str, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s%s", "Object", str);
+
+		return tplg_pp_get_widget_name(tplg_pp, child, new_str);
+	}
+
+	return child->name;
+}
+
+int tplg_build_dapm_route_object(struct tplg_pre_processor *tplg_pp,
+				 struct tplg_object *object)
+{
+	struct tplg_attribute *pipeline_id, *attr;
+	snd_config_t *top, *route, *child, *lines;
+	char *route_name, *line_str;
+	char prefix[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	char control[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	char source[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	char sink[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	int len, ret;
+
+	tplg_pp_debug("Building DAPM route object: '%s' ...", object->name);
+
+	ret = snd_config_search(tplg_pp->cfg, "SectionGraph", &top);
+	if (ret < 0) {
+		ret = snd_config_make_add(&top, "SectionGraph",
+					  SND_CONFIG_TYPE_COMPOUND, tplg_pp->cfg);
+		if (ret < 0) {
+			SNDERR("Error creating 'SectionGraph' config\n");
+			return ret;
+		}
+	}
+
+	pipeline_id = tplg_get_attribute_by_name(&object->attribute_list, "pipeline_id");
+
+	/* add SectionGraph node */
+	if (object->parent)
+		snprintf(prefix, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s", object->parent->name);
+	else
+
+		snprintf(prefix, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s", "emdpoint");
+
+	len = SNDRV_CTL_ELEM_ID_NAME_MAXLEN + strlen(object->name);
+	route_name = calloc(1, len + 1);
+	if (!route_name)
+		return -ENOMEM;
+
+	snprintf(route_name, len + 1, "%s.%s", prefix, object->name);
+
+	ret = snd_config_make_add(&route, route_name, SND_CONFIG_TYPE_COMPOUND, top);
+	if (ret < 0) {
+		SNDERR("Error creating route config for %s\n", object->name);
+		return ret;
+	}
+
+	/* add index */
+	ret = snd_config_make_add(&child, "index", SND_CONFIG_TYPE_INTEGER, route);
+	if (ret < 0) {
+		SNDERR("Error creating index config for %s\n", object->name);
+		return ret;
+	}
+
+	ret = snd_config_set_integer(child, pipeline_id->value.integer);
+	if (ret < 0) {
+		SNDERR("Error setting index config for %s\n", object->name);
+		return ret;
+	}
+
+	/* add lines */
+	ret = snd_config_make_add(&lines, "lines", SND_CONFIG_TYPE_COMPOUND, route);
+	if (ret < 0) {
+		SNDERR("Error creating lines config for %s\n", object->name);
+		return ret;
+	}
+
+	/* Parse connection object and get widget names for source and sink */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+		char *widget_name;
+
+		if (!strcmp(attr->name, "index") || !strcmp(attr->name, "pipeline_id"))
+			continue;
+
+		if (!strcmp(attr->name, "control")) {
+			snd_strlcpy(control, attr->value.string, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			continue;
+		}
+
+		widget_name = tplg_pp_get_widget_name(tplg_pp, object, attr->value.string);
+		if (!widget_name) {
+			SNDERR("Failed to find widget '%s' for route %s\n", attr->value.string,
+			      object->name);
+			return -EINVAL;
+		}
+
+		if (!strcmp(attr->name, "source")) {
+			snd_strlcpy(source, widget_name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			continue;
+		}
+
+		if (!strcmp(attr->name, "sink"))
+			snd_strlcpy(sink, widget_name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	}
+
+	/* add route string */
+	ret = snd_config_make_add(&child, "0", SND_CONFIG_TYPE_STRING, lines);
+	if (ret < 0) {
+		SNDERR("Error creating lines config for %s\n", object->name);
+		return ret;
+	}
+
+	/* length of the route string including commas and spaces */
+	len = strlen(source) + strlen(sink) + strlen(control) + 4;
+	line_str = calloc(1, len + 1);
+	if (!line_str)
+		return -ENOMEM;
+	snprintf(line_str, len + 1, "%s, %s, %s", source, control, sink);
+
+	/* set the line string */
+	ret = snd_config_set_string(child, line_str);
+	if (ret < 0) {
+		SNDERR("Error creating lines config for %s\n", object->name);
+		return ret;
+	}
+
+	return ret;
+}
