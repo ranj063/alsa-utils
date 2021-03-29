@@ -17,7 +17,9 @@
   The full GNU General Public License is included in this distribution
   in the file called LICENSE.GPL.
 */
+#include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -44,18 +46,183 @@ static struct tplg_class *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, 
 	return NULL;
 }
 
-static int tplg_parse_class_attribute(struct tplg_pre_processor *tplg_pp ATTRIBUTE_UNUSED,
+/* save valid values references for attributes */
+static int tplg_parse_constraint_valid_value_ref(struct tplg_pre_processor *tplg_pp ATTRIBUTE_UNUSED,
+					      snd_config_t *cfg, struct tplg_attribute *attr)
+{
+	struct attribute_constraint *c = &attr->constraint;
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+
+	snd_config_for_each(i, next, cfg) {
+		struct tplg_attribute_ref *ref;
+		const char *id, *s;
+		long value;
+		int err;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0) {
+			SNDERR("Invalid reference ID for '%s'\n", attr->name);
+			return -EINVAL;
+		}
+
+		err = snd_config_get_string(n, &s);
+		if (err < 0) {
+			err = snd_config_get_integer(n, &value);
+			if (err < 0) {
+				SNDERR("Invalid reference value for attribute %s, must be integer",
+				       attr->name);
+				return err;
+			}
+		} else {
+			if (s[0] < '0' || s[0] > '9') {
+				SNDERR("Reference value not an integer for %s\n", attr->name);
+				return -EINVAL;
+			}
+			value = atoi(s);
+		}
+
+		/* update the value ref with the tuple value */
+		list_for_each_entry(ref, &c->value_list, list)
+			if (!strcmp(ref->id, id)) {
+				ref->value = value;
+				break;
+			}
+	}
+
+	return 0;
+}
+
+/* save valid values for attributes */
+static int tplg_parse_constraint_valid_values(struct tplg_pre_processor *tplg_pp ATTRIBUTE_UNUSED,
+					      snd_config_t *cfg, struct tplg_attribute *attr)
+{
+	struct attribute_constraint *c = &attr->constraint;
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+
+	snd_config_for_each(i, next, cfg) {
+		struct tplg_attribute_ref *ref;
+		const char *id, *s;
+		int err;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0) {
+			SNDERR("invalid reference value for '%s'\n", attr->name);
+			return -EINVAL;
+		}
+
+		ref = calloc(1, sizeof(*ref));
+		if (!ref)
+			return -ENOMEM;
+
+		err = snd_config_get_string(n, &s);
+		if (err < 0) {
+			SNDERR("Invalid valid value for %s\n", attr->name);
+			return err;
+		}
+
+		ref->string = s;
+		ref->id = id;
+		ref->value = -EINVAL;
+		list_add(&ref->list, &c->value_list);
+	}
+
+	return 0;
+}
+
+/*
+ * Attributes can be associated with constraints such as min, max values.
+ * Some attributes could also have pre-defined valid values.
+ * The pre-defined values are human-readable values that sometimes need to be translated
+ * to tuple values for provate data. For ex: the value "playback" and "capture" for
+ * direction attributes need to be translated to 0 and 1 respectively for a DAI widget
+ */
+static int tplg_parse_class_constraints(struct tplg_pre_processor *tplg_pp ATTRIBUTE_UNUSED,
+					snd_config_t *cfg,struct tplg_attribute *attr)
+{
+	struct attribute_constraint *c = &attr->constraint;
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	int err;
+
+	snd_config_for_each(i, next, cfg) {
+		const char *id;
+		long v;
+
+		n = snd_config_iterator_entry(i);
+
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/* set min value constraint */
+		if (!strcmp(id, "min")) {
+			err = snd_config_get_integer(n, &v);
+			if (err < 0) {
+				SNDERR("Invalid min constraint for %s\n", attr->name);
+				return err;
+			}
+			c->min = v;
+			continue;
+		}
+
+		/* set max value constraint */
+		if (!strcmp(id, "max")) {
+			err = snd_config_get_integer(n, &v);
+			if (err < 0) {
+				SNDERR("Invalid max constraint for %s\n", attr->name);
+				return err;
+			}
+			c->max = v;
+			continue;
+		}
+
+		/* parse the list of valid values */
+		if (!strcmp(id, "valid_values")) {
+			err = tplg_parse_constraint_valid_values(tplg_pp, n, attr);
+			if (err < 0) {
+				SNDERR("Error parsing valid values for %s\n", attr->name);
+				return err;
+			}
+			continue;
+		}
+
+		/* parse reference for string values that need to be translated to tuple values */
+		if (!strcmp(id, "tuple_values")) {
+			err = tplg_parse_constraint_valid_value_ref(tplg_pp, n, attr);
+			if (err < 0) {
+				SNDERR("Error parsing valid values for %s\n", attr->name);
+				return err;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static int tplg_parse_class_attribute(struct tplg_pre_processor *tplg_pp,
 				      snd_config_t *cfg, struct tplg_attribute *attr)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	const char *id;
+	int ret;
 
 	snd_config_for_each(i, next, cfg) {
 		n = snd_config_iterator_entry(i);
 
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
+
+		/* Parse class attribute constraints */
+		if (!strcmp(id, "constraints")) {
+			ret = tplg_parse_class_constraints(tplg_pp, n, attr);
+			if (ret < 0) {
+				SNDERR("Error parsing constraints for %s\n", attr->name);
+				return -EINVAL;
+			}
+			continue;
+		}
 
 		/*
 		 * Parse token reference for class attributes/arguments. The token_ref field
@@ -104,6 +271,12 @@ static int tplg_parse_class_attributes(struct tplg_pre_processor *tplg_pp,
 		attr->param_type = type;
 		if (type == TPLG_CLASS_PARAM_TYPE_ARGUMENT)
 			class->num_args++;
+
+
+		/* init attribute */
+		INIT_LIST_HEAD(&attr->constraint.value_list);
+		attr->constraint.min = INT_MIN;
+		attr->constraint.max = INT_MAX;
 
 		/* set attribute name */
 		snd_strlcpy(attr->name, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);

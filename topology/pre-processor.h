@@ -23,6 +23,26 @@
 #include "topology.h"
 #include "../alsactl/list.h"
 
+/*
+ * some attribute's have valid string values that translate to integer values. The "string"
+ * field stored the human readable value and the "value" field stores the corresponding integer
+ * values. "value" is set to -EINVAL by default and is updated based on the value_ref array
+ * values.
+ */
+struct tplg_attribute_ref {
+	const char *id;
+	const char *string;
+	int value;
+	struct list_head list; /* item in attribute constraint value_list */
+};
+
+struct attribute_constraint {
+	struct list_head value_list; /* list of valid values */
+	int mask;
+	int min;
+	int max;
+};
+
 enum tplg_class_param_type {
 	TPLG_CLASS_PARAM_TYPE_ARGUMENT,
 	TPLG_CLASS_PARAM_TYPE_ATTRIBUTE,
@@ -34,6 +54,7 @@ struct tplg_attribute {
 	enum tplg_class_param_type param_type;
 	struct list_head list; /* item in class attribute list */
 	char token_ref[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	struct attribute_constraint constraint;
 	union {
 		long integer;
 		long long integer64;

@@ -133,8 +133,15 @@ void free_attributes(struct list_head *list)
 {
 	struct tplg_attribute *attr, *_attr;
 
-	list_for_each_entry_safe(attr, _attr, list, list)
+	list_for_each_entry_safe(attr, _attr, list, list) {
+		struct attribute_constraint *c = &attr->constraint;
+		struct tplg_attribute_ref *ref, *_ref;
+
+		list_for_each_entry_safe(ref, _ref, &c->value_list, list)
+			free(ref);
+
 		free(attr);
+	}
 }
 
 void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp)
