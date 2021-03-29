@@ -254,3 +254,47 @@ err:
 	free(pcm);
 	return ret;
 }
+
+int tplg_build_pcm_caps_object(struct tplg_pre_processor *tplg_pp,
+			       struct tplg_object *object)
+{
+	struct tplg_attribute *caps, *attr;
+	struct snd_soc_tplg_stream_caps *sc;
+	int ret;
+
+	sc = calloc(1, sizeof(*sc));
+	if (!sc)
+		return -ENOMEM;
+
+	sc->size = sizeof(*sc);
+
+	caps = tplg_get_attribute_by_name(&object->attribute_list, "capabilities");
+
+	/* parse PCM Capabiilities params */
+	list_for_each_entry(attr, &object->attribute_list, list) {
+		if (!attr->cfg)
+			continue;
+
+		ret = snd_soc_tplg_parse_stream_caps_param(attr->cfg, sc);
+		if (ret < 0) {
+			SNDERR("Failed to parse PCM %s\n", object->name);
+			goto err;
+		}
+	}
+
+	/* Save the SectionPCMCapabilities */
+	ret = snd_tplg_save_printf(&tplg_pp->buf, "", "SectionPCMCapabilities.");
+	if (ret < 0)
+		goto err;
+
+	/* save capabilities */
+	ret = snd_soc_tplg_save_stream_caps(sc, caps->value.string, &tplg_pp->buf, "");
+	if (ret < 0)
+		SNDERR("Failed to save PCM Capabilities '%s'\n", caps->value.string);
+
+	print_pre_processed_config(tplg_pp);
+
+err:
+	free(sc);
+	return ret;
+}
