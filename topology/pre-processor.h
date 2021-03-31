@@ -120,4 +120,6 @@ tplg_create_object(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg, struct
 		   struct tplg_object *parent, struct list_head *list);
 struct tplg_object *tplg_object_lookup_in_list(struct list_head *list, const char *class_name,
 					       char *input);
+int tplg_attribute_config_update(snd_config_t *parent, struct tplg_attribute *attr);
+snd_config_t *tplg_find_config(snd_config_t *config, char *name);
 #endif
