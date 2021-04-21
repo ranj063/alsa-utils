@@ -17,7 +17,6 @@
   The full GNU General Public License is included in this distribution
   in the file called LICENSE.GPL.
 */
-
 #include <stdarg.h>
 #include <stdio.h>
 #include <stddef.h>
