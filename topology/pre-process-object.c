@@ -873,6 +873,7 @@ const struct build_function_map object_build_map[] = {
 	{"Base", "VendorToken", "SectionVendorTokens", &tplg_build_vendor_token_object, NULL},
 	{"Base", "hw_config", "SectionHWConfig", &tplg_build_hw_cfg_object,
 	 &hwcfg_config},
+	{"Base", "fe_dai", "dai", &tplg_build_fe_dai_object, &fe_dai_config},
 	{"Base", "route", "SectionGraph", &tplg_build_dapm_route_object, NULL},
 	{"Widget", "", "SectionWidget", &tplg_build_generic_object, &widget_config},
 	{"Control", "mixer", "SectionControlMixer", &tplg_build_mixer_control,
