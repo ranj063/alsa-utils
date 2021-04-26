@@ -164,6 +164,27 @@ int tplg_create_hwcfg_template(snd_config_t **template)
 	return ret;
 }
 
+/* create new fe_dai config template */
+int tplg_create_fe_dai_template(snd_config_t **ctemplate)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make(&top, "template", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "id", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret < 0)
+		snd_config_delete(top);
+
+	*ctemplate = top;
+
+	return ret;
+}
+
 int tplg_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp,
 			       snd_config_t *obj_cfg, snd_config_t *parent)
 {
@@ -182,4 +203,10 @@ int tplg_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp,
 		return ret;
 
 	return tplg_parent_update(tplg_pp, parent, "hw_configs", name);
+}
+
+int tplg_build_fe_dai_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	return tplg_build_base_object(tplg_pp, obj_cfg, parent, false);
 }
