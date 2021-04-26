@@ -67,6 +67,8 @@ int tplg_build_bytes_control(struct tplg_pre_processor *tplg_pp, snd_config_t *o
 			      snd_config_t *parent);
 int tplg_build_dapm_route_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
 			      snd_config_t *parent);
+int tplg_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp,
+			       snd_config_t *obj_cfg, snd_config_t *parent);
 int tplg_parent_update(struct tplg_pre_processor *tplg_pp, snd_config_t *parent,
 			  const char *section_name, const char *item_name);
 
@@ -105,6 +107,7 @@ extern const struct config_template_items widget_config;
 extern const struct config_template_items scale_config, ops_config, channel_config;
 extern const struct config_template_items mixer_control_config, bytes_control_config;
 extern const struct config_template_items be_dai_config, pcm_config;
+extern const struct config_template_items hwcfg_config;
 
 char *tplg_snprintf(char *fmt, ...);
 #endif

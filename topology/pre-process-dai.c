@@ -36,3 +36,30 @@ const struct config_template_items pcm_config = {
 	.int_config_ids = {"id", "compress", "symmertic_rates", "symmetric_channels",
 			   "symmetric_sample_bits"},
 };
+
+const struct config_template_items hwcfg_config = {
+	.int_config_ids = {"id", "bclk_freq", "bclk_invert", "fsync_invert", "fsync_freq",
+			   "mclk_freq", "pm_gate_clocks", "tdm_slots", "tdm_slot_width",
+			   "tx_slots", "rx_slots", "tx_channels", "rx_channels"},
+	.string_config_ids = {"format", "bclk", "fsync", "mclk"},
+};
+
+int tplg_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp,
+			       snd_config_t *obj_cfg, snd_config_t *parent)
+{
+	snd_config_t *hw_cfg, *obj;
+	const char *name;
+	int ret;
+
+	obj = tplg_object_get_instance_config(tplg_pp, obj_cfg);
+
+	name = tplg_object_get_name(tplg_pp, obj);
+	if (!name)
+		return -EINVAL;
+
+	ret = tplg_build_object_from_template(tplg_pp, obj_cfg, &hw_cfg, NULL, false);
+	if (ret < 0)
+		return ret;
+
+	return tplg_parent_update(tplg_pp, parent, "hw_configs", name);
+}
