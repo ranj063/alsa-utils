@@ -31,3 +31,24 @@ const struct config_template_items widget_config = {
 			    "event_flags"},
 	.string_config_ids = {"type", "stream_name"},
 };
+
+int tplg_build_tlv_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	snd_config_t *cfg;
+	const char *name;
+	int ret;
+
+	cfg = tplg_object_get_instance_config(tplg_pp, obj_cfg);
+
+	name = tplg_object_get_name(tplg_pp, cfg);
+	if (!name)
+		return -EINVAL;
+
+	ret = tplg_build_object_from_template(tplg_pp, obj_cfg, &cfg, NULL, false);
+	if (ret < 0)
+		return ret;
+
+	return tplg_parent_update(tplg_pp, parent, "tlv", name);
+}
+>>>>>>> 7199c74... topology: pre-process-dapm: Add support for tlv objects
