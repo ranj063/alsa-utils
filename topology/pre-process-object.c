@@ -221,6 +221,25 @@ min_max_check:
 	return tplg_object_is_attribute_min_max_valid(attr, obj_attr, false);
 }
 
+/* get object's name attribute value */
+const char *tplg_object_get_name(struct tplg_pre_processor *tplg_pp,
+				 snd_config_t *object)
+{
+	snd_config_t *cfg;
+	const char *name;
+	int ret;
+
+	ret = snd_config_search(object, "name", &cfg);
+	if (ret < 0)
+		return NULL;
+
+	ret = snd_config_get_string(cfg, &name);
+	if (ret < 0)
+		return NULL;
+
+	return name;
+}
+
 /* look up the instance of object in a config */
 static snd_config_t *tplg_object_lookup_in_config(struct tplg_pre_processor *tplg_pp,
 						  snd_config_t *class, const char *type,
@@ -236,6 +255,190 @@ static snd_config_t *tplg_object_lookup_in_config(struct tplg_pre_processor *tpl
 	snd_config_search(class, config_id, &obj_cfg);
 	free(config_id);
 	return obj_cfg;
+}
+
+/* search for all template configs in the source config and copy them to the destination */
+static int tplg_object_add_attributes(snd_config_t *dst, snd_config_t *template,
+				      snd_config_t *src)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	int ret;
+
+	snd_config_for_each(i, next, template) {
+		snd_config_t *attr, *new;
+		const char *id;
+	
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		ret = snd_config_search(src, id, &attr);
+		if (ret < 0)
+			continue;
+
+		/* skip if attribute is already set */
+		ret = snd_config_search(dst, id, &new);
+		if (ret >= 0)
+			continue;
+
+		ret = snd_config_copy(&new, attr);
+		if (ret < 0) {
+			SNDERR("failed to copy attribute %s\n", id);
+			return ret;
+		}
+
+		ret = snd_config_add(dst, new);
+		if (ret < 0) {
+			SNDERR("failed to add attribute %s\n", id);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+/*
+ * Function to create a new "section" config based on the template. The new config will be
+ * added to the output_cfg or the top_config input parameter.
+ */
+int tplg_build_object_from_template(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+				    snd_config_t **wtop, snd_config_t *top_config,
+				    bool skip_name)
+{
+	snd_config_t *top, *template, *obj;
+	template_func template_function;
+	const struct build_function_map *map;
+	const char *object_name;
+	int ret;
+
+	/* look up object map */
+	map = tplg_object_get_map(tplg_pp, obj_cfg);
+	if (!map) {
+		SNDERR("unknown object type or class name\n");
+		return -EINVAL;
+	}
+
+	obj = tplg_object_get_instance_config(tplg_pp, obj_cfg);
+
+	/* look up or create the corresponding section config for object */
+	if (!top_config)
+		top_config = tplg_pp->output_cfg;
+
+	ret = snd_config_search(top_config, map->section_name, &top);
+	if (ret < 0) {
+		ret = tplg_config_make_add(&top, map->section_name, SND_CONFIG_TYPE_COMPOUND,
+					   top_config);
+		if (ret < 0) {
+			SNDERR("Error creating %s config\n", map->section_name);
+			return ret;
+		}
+	}
+
+	/* get object name */
+	object_name = tplg_object_get_name(tplg_pp, obj);
+	if (!object_name) {
+		ret = snd_config_get_id(obj, &object_name);
+		if (ret < 0) {
+			SNDERR("Invalid ID for %s\n", map->section_name);
+			return ret;
+		}
+	}
+
+	tplg_pp_debug("Building object: '%s' ...", object_name);
+
+	/* create and add new object config with name, if needed */
+	if (skip_name) {
+		*wtop = top;
+	} else {
+		*wtop = tplg_find_config(top, object_name);
+		if (!(*wtop)) {
+			ret = tplg_config_make_add(wtop, object_name, SND_CONFIG_TYPE_COMPOUND,
+						   top);
+			if (ret < 0) {
+				SNDERR("Error creating config for %s\n", object_name);
+				return ret;
+			}
+		}
+	}
+
+	/* create template config */
+	template_function = map->template_function;
+	if (!template_function)
+		return 0;
+
+	ret = template_function(&template);
+	if (ret < 0) {
+		SNDERR("Failed to create template for %s\n", object_name);
+		return ret;
+	}
+
+	/* update section config based on template and the attribute values in the object */
+	ret = tplg_object_add_attributes(*wtop, template, obj);
+	snd_config_delete(template);
+	if (ret < 0)
+		SNDERR("Error adding attributes for object '%s'\n", object_name);
+
+	return ret;
+}
+
+static int tplg_build_generic_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+				     snd_config_t *parent)
+{
+	snd_config_t *wtop;
+	const char *name;
+	int ret;
+
+	ret = tplg_build_object_from_template(tplg_pp, obj_cfg, &wtop, NULL, false);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_config_get_id(wtop, &name);
+	if (ret < 0)
+		return ret;
+
+	tplg_pp_config_debug(tplg_pp, tplg_pp->output_cfg);
+
+	return ret;
+}
+
+const struct build_function_map object_build_map[] = {
+	{"Base", "manifest", "SectionManifest", &tplg_build_generic_object, NULL},
+};
+
+const struct build_function_map *tplg_object_get_map(struct tplg_pre_processor *tplg_pp,
+						     snd_config_t *obj)
+{
+	snd_config_iterator_t first;
+	snd_config_t *class;
+	const char *class_type, *class_name;
+	unsigned int i;
+
+	first = snd_config_iterator_first(obj);
+	class = snd_config_iterator_entry(first);
+
+	if (snd_config_get_id(class, &class_name) < 0)
+		return NULL;
+
+	if (snd_config_get_id(obj, &class_type) < 0)
+		return NULL;
+
+	for (i = 0; i < ARRAY_SIZE(object_build_map); i++) {
+		if (!strcmp(class_type, "Widget") &&
+		    !strcmp(object_build_map[i].class_type, "Widget"))
+			return &object_build_map[i];
+
+		if (!strcmp(class_type, "Dai") &&
+		    !strcmp(object_build_map[i].class_type, "Dai"))
+			return &object_build_map[i];
+
+		/* for other type objects, also match the object class_name */
+		if (!strcmp(class_type, object_build_map[i].class_type) &&
+		    !strcmp(object_build_map[i].class_name, class_name))
+			return &object_build_map[i];
+	}
+
+	return NULL;
 }
 
 /* return 1 if attribute not found in search_config, 0 on success and negative value on error */
@@ -619,6 +822,8 @@ static int tplg_build_object(struct tplg_pre_processor *tplg_pp, snd_config_t *n
 			      snd_config_t *parent)
 {
 	snd_config_t *obj_local, *class_cfg;
+	const struct build_function_map *map;
+	build_func builder;
 	const char *id, *class_id;
 	int ret;
 
@@ -652,10 +857,21 @@ static int tplg_build_object(struct tplg_pre_processor *tplg_pp, snd_config_t *n
 
 	/* construct object name using class constructor */
 	ret = tplg_construct_object_name(tplg_pp, obj_local, class_cfg);
-	if (ret < 0)
+	if (ret < 0) {
 		SNDERR("Failed to construct object name for %s\n", id);
+		return ret;
+	}
 
-	return ret;
+	tplg_pp_config_debug(tplg_pp, obj_local);
+
+	/* nothing to do if object is not supported */
+	map = tplg_object_get_map(tplg_pp, new_obj);
+	if (!map)
+		return 0;
+
+	/* build the object and save the sections to the output config */
+	builder = map->builder;
+	return builder(tplg_pp, new_obj, parent);
 }
 
 /* create top-level topology objects */
