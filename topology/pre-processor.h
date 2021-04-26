@@ -87,7 +87,7 @@ int tplg_config_make_add(snd_config_t **config, const char *id, snd_config_type_
 			 snd_config_t *parent);
 
 /* template configs */
-extern const struct config_template_items data_config;
+extern const struct config_template_items widget_config;
 
 char *tplg_snprintf(char *fmt, ...);
 #endif
