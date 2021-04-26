@@ -877,6 +877,8 @@ const struct build_function_map object_build_map[] = {
 	 &mixer_control_config},
 	{"Control", "bytes", "SectionControlBytes", &tplg_build_bytes_control,
 	 &bytes_control_config},
+	{"Dai", "", "SectionBE", &tplg_build_generic_object, &be_dai_config},
+	{"PCM", "pcm", "SectionPCM", &tplg_build_generic_object, &pcm_config},
 };
 
 static const struct build_function_map *tplg_object_get_map(struct tplg_pre_processor *tplg_pp,

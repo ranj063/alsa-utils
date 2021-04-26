@@ -104,6 +104,7 @@ int tplg_config_make_add(snd_config_t **config, const char *id, snd_config_type_
 extern const struct config_template_items widget_config;
 extern const struct config_template_items scale_config, ops_config, channel_config;
 extern const struct config_template_items mixer_control_config, bytes_control_config;
+extern const struct config_template_items be_dai_config, pcm_config;
 
 char *tplg_snprintf(char *fmt, ...);
 #endif
