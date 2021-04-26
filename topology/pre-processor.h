@@ -57,6 +57,7 @@ const struct build_function_map *tplg_object_get_map(struct tplg_pre_processor *
 						     snd_config_t *obj);
 const char *tplg_object_get_name(struct tplg_pre_processor *tplg_pp,
 				 snd_config_t *object);
+snd_config_t *tplg_object_get_section(struct tplg_pre_processor *tplg_pp, snd_config_t *class);
 
 /* class helpers */
 snd_config_t *tplg_class_lookup(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg);
