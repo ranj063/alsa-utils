@@ -65,6 +65,8 @@ int tplg_build_bytes_control(struct tplg_pre_processor *tplg_pp, snd_config_t *o
 			      snd_config_t *parent);
 int tplg_build_dapm_route_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
 			      snd_config_t *parent);
+int tplg_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp,
+			       snd_config_t *obj_cfg, snd_config_t *parent);
 int tplg_parent_update(struct tplg_pre_processor *tplg_pp, snd_config_t *parent,
 			  const char *section_name, const char *item_name);
 
@@ -110,6 +112,7 @@ int tplg_create_mixer_template(snd_config_t **mixer_template);
 int tplg_create_bytes_template(snd_config_t **bytes_template);
 int tplg_pp_create_be_template(snd_config_t **be_template);
 int tplg_create_pcm_template(snd_config_t **pcm_template);
+int tplg_create_hwcfg_template(snd_config_t **template);
 
 char *tplg_snprintf(char *fmt, ...);
 #endif

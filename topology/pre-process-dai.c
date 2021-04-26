@@ -96,3 +96,90 @@ int tplg_create_pcm_template(snd_config_t **pcm_template)
 	*pcm_template = top;
 	return ret;
 }
+
+int tplg_create_hwcfg_template(snd_config_t **template)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make(&top, "template", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "id", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "format", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "bclk", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "bclk_freq", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "bclk_invert", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "fsync", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "fsync_invert", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "fsync_freq", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "mclk", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "mclk_freq", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "pm_gate_clocks", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "tdm_slots", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "tdm_slot_width", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "tx_slots", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "rx_slots", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "tx_channels", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+		ret = tplg_config_make_add(&child, "rx_channels", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret < 0)
+		snd_config_delete(top);
+
+	*template = top;
+	return ret;
+}
+
+int tplg_build_hw_cfg_object(struct tplg_pre_processor *tplg_pp,
+			       snd_config_t *obj_cfg, snd_config_t *parent)
+{
+	snd_config_t *hw_cfg, *obj;
+	const char *name;
+	int ret;
+
+	obj = tplg_object_get_instance_config(tplg_pp, obj_cfg);
+
+	name = tplg_object_get_name(tplg_pp, obj);
+	if (!name)
+		return -EINVAL;
+
+	ret = tplg_build_object_from_template(tplg_pp, obj_cfg, &hw_cfg, NULL, false);
+	if (ret < 0)
+		return ret;
+
+	return tplg_parent_update(tplg_pp, parent, "hw_configs", name);
+}
