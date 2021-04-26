@@ -55,6 +55,12 @@ int tplg_build_object_from_template(struct tplg_pre_processor *tplg_pp, snd_conf
 				    bool skip_name);
 int tplg_build_tlv_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
 			      snd_config_t *parent);
+int tplg_build_scale_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent);
+int tplg_build_ops_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent);
+int tplg_build_channel_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent);
 int tplg_parent_update(struct tplg_pre_processor *tplg_pp, snd_config_t *parent,
 			  const char *section_name, const char *item_name);
 
@@ -90,6 +96,7 @@ int tplg_config_make_add(snd_config_t **config, const char *id, snd_config_type_
 
 /* template configs */
 extern const struct config_template_items widget_config;
+extern const struct config_template_items scale_config, ops_config, channel_config;
 
 char *tplg_snprintf(char *fmt, ...);
 #endif

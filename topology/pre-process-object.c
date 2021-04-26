@@ -866,6 +866,10 @@ const struct build_function_map object_build_map[] = {
 	{"Base", "manifest", "SectionManifest", &tplg_build_generic_object, NULL},
 	{"Base", "data", "SectionData", &tplg_build_data_object, &data_config},
 	{"Base", "tlv", "SectionTLV", &tplg_build_tlv_object, NULL},
+	{"Base", "scale", "scale", &tplg_build_scale_object, &scale_config},
+	{"Base", "ops", "ops" ,&tplg_build_ops_object, &ops_config},
+	{"Base", "extops", "extops" ,&tplg_build_ops_object, &ops_config},
+	{"Base", "channel", "channel", &tplg_build_channel_object, &channel_config},
 	{"Base", "VendorToken", "SectionVendorTokens", &tplg_build_vendor_token_object, NULL},
 	{"Widget", "", "SectionWidget", &tplg_build_generic_object, &widget_config},
 };
