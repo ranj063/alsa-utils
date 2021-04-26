@@ -70,6 +70,131 @@ int tplg_create_widget_config_template(snd_config_t **wtemplate)
 	return ret;
 }
 
+/* create scale config template */
+int tplg_create_scale_template(snd_config_t **scale_template)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make(&top, "template", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "mute", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "min", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "step", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret < 0)
+		snd_config_delete(top);
+
+	*scale_template = top;
+
+	return ret;
+}
+
+/* create new ops config template */
+int tplg_create_ops_template(snd_config_t **ops_template)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make(&top, "template", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "info", SND_CONFIG_TYPE_STRING, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "get", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "put", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret < 0)
+		snd_config_delete(top);
+
+	*ops_template = top;
+
+	return ret;
+}
+
+/* create new channel config template */
+int tplg_create_channel_template(snd_config_t **ctemplate)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make(&top, "template", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "reg", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "shift", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret < 0)
+		snd_config_delete(top);
+
+	*ctemplate = top;
+
+	return ret;
+}
+
+int tplg_build_base_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			   snd_config_t *parent, bool skip_name)
+{
+	snd_config_t *top, *parent_obj, *cfg, *dest;
+	const char *parent_name;
+
+	/* find parent section config */
+	top = tplg_object_get_section(tplg_pp, parent);
+	if (!top)
+		return -EINVAL;
+
+	parent_obj = tplg_object_get_instance_config(tplg_pp, parent);
+
+	/* get parent name */
+	parent_name = tplg_object_get_name(tplg_pp, parent_obj);
+	if (!parent_name)
+		return 0;
+
+	/* find parent config with name */
+	dest = tplg_find_config(top, parent_name);
+	if (!dest) {
+		SNDERR("Cannot find parent config %s\n", parent_name);
+		return -EINVAL;
+	}
+
+	/* build config from template and add to parent */
+	return tplg_build_object_from_template(tplg_pp, obj_cfg, &cfg, dest, skip_name);
+}
+
+int tplg_build_scale_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	return tplg_build_base_object(tplg_pp, obj_cfg, parent, true);
+}
+
+int tplg_build_ops_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	return tplg_build_base_object(tplg_pp, obj_cfg, parent, false);
+}
+
+int tplg_build_channel_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	return tplg_build_base_object(tplg_pp, obj_cfg, parent, false);
+}
+
 int tplg_build_tlv_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
 			      snd_config_t *parent)
 {
