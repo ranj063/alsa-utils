@@ -674,6 +674,8 @@ const struct build_function_map object_build_map[] = {
 	 &tplg_create_bytes_template},
 	{"Dai", "", "SectionBE", &tplg_build_generic_object, &tplg_pp_create_be_template},
 	{"PCM", "pcm", "SectionPCM", &tplg_build_generic_object, &tplg_create_pcm_template},
+	{"PCM", "pcm_caps", "SectionPCMCapabilities", &tplg_build_pcm_caps_object,
+	 &tplg_create_pcm_caps_template},
 };
 
 const struct build_function_map *tplg_object_get_map(struct tplg_pre_processor *tplg_pp,
