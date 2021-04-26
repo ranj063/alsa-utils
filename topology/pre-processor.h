@@ -108,6 +108,8 @@ int tplg_create_ops_template(snd_config_t **ops_template);
 int tplg_create_channel_template(snd_config_t **ctemplate);
 int tplg_create_mixer_template(snd_config_t **mixer_template);
 int tplg_create_bytes_template(snd_config_t **bytes_template);
+int tplg_pp_create_be_template(snd_config_t **be_template);
+int tplg_create_pcm_template(snd_config_t **pcm_template);
 
 char *tplg_snprintf(char *fmt, ...);
 #endif
