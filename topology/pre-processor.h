@@ -59,6 +59,10 @@ int tplg_build_ops_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_
 			      snd_config_t *parent);
 int tplg_build_channel_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
 			      snd_config_t *parent);
+int tplg_build_mixer_control(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent);
+int tplg_build_bytes_control(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent);
 int tplg_parent_update(struct tplg_pre_processor *tplg_pp, snd_config_t *parent,
 			  const char *section_name, const char *item_name);
 
@@ -100,6 +104,8 @@ int tplg_create_widget_config_template(snd_config_t **wtemplate);
 int tplg_create_scale_template(snd_config_t **scale_template);
 int tplg_create_ops_template(snd_config_t **ops_template);
 int tplg_create_channel_template(snd_config_t **ctemplate);
+int tplg_create_mixer_template(snd_config_t **mixer_template);
+int tplg_create_bytes_template(snd_config_t **bytes_template);
 
 char *tplg_snprintf(char *fmt, ...);
 #endif

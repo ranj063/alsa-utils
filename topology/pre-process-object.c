@@ -664,6 +664,10 @@ const struct build_function_map object_build_map[] = {
 	{"Base", "VendorToken", "SectionVendorTokens", &tplg_build_vendor_token_object, NULL},
 	{"Widget", "", "SectionWidget", &tplg_build_generic_object,
 	 &tplg_create_widget_config_template},
+	{"Control", "mixer", "SectionControlMixer", &tplg_build_mixer_control,
+	 &tplg_create_mixer_template},
+	{"Control", "bytes", "SectionControlBytes", &tplg_build_bytes_control,
+	 &tplg_create_bytes_template},
 };
 
 const struct build_function_map *tplg_object_get_map(struct tplg_pre_processor *tplg_pp,

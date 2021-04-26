@@ -70,6 +70,67 @@ int tplg_create_widget_config_template(snd_config_t **wtemplate)
 	return ret;
 }
 
+/* create new mixer config template */
+int tplg_create_mixer_template(snd_config_t **mixer_template)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make(&top, "template", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	ret = tplg_config_make_add(&child, "index", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "invert", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "access", SND_CONFIG_TYPE_COMPOUND, top);
+
+	if (ret < 0)
+		snd_config_delete(top);
+
+	*mixer_template = top;
+	return ret;
+}
+
+/* create new mixer config template */
+int tplg_create_bytes_template(snd_config_t **bytes_template)
+{
+	snd_config_t *top, *child;
+	int ret;
+
+	ret = snd_config_make(&top, "template", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "index", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "base", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "num_regs", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "max", SND_CONFIG_TYPE_INTEGER, top);
+
+	if (ret >= 0)
+	ret = tplg_config_make_add(&child, "mask", SND_CONFIG_TYPE_COMPOUND, top);
+
+	if (ret < 0)
+		snd_config_delete(top);
+
+	*bytes_template = top;
+
+	return ret;
+}
+
 /* create scale config template */
 int tplg_create_scale_template(snd_config_t **scale_template)
 {
@@ -213,4 +274,43 @@ int tplg_build_tlv_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_
 		return ret;
 
 	return tplg_parent_update(tplg_pp, parent, "tlv", name);
+}
+
+static int tplg_build_control(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent, char *type)
+{
+	snd_config_t *cfg, *obj;
+	const char *name;
+	int ret;
+
+	obj = tplg_object_get_instance_config(tplg_pp, obj_cfg);
+
+	/* get control name */
+	ret = snd_config_search(obj, "name", &cfg);
+	if (ret < 0)
+		return 0;
+
+	ret = snd_config_get_string(cfg, &name);
+	if (ret < 0)
+		return ret;
+
+	ret = tplg_build_object_from_template(tplg_pp, obj_cfg, &cfg, NULL, false);
+	if (ret < 0)
+		return ret;
+
+	tplg_pp_config_debug(tplg_pp, tplg_pp->output_cfg);
+
+	return tplg_parent_update(tplg_pp, parent, type, name);
+}
+
+int tplg_build_mixer_control(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	return tplg_build_control(tplg_pp, obj_cfg, parent, "mixer");
+}
+
+int tplg_build_bytes_control(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	return tplg_build_control(tplg_pp, obj_cfg, parent, "bytes");
 }
