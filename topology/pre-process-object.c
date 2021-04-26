@@ -653,6 +653,8 @@ static int tplg_build_generic_object(struct tplg_pre_processor *tplg_pp, snd_con
 
 const struct build_function_map object_build_map[] = {
 	{"Base", "manifest", "SectionManifest", &tplg_build_generic_object, NULL},
+	{"Base", "data", "SectionData", &tplg_build_data_object,
+	 &tplg_create_data_config_template},
 };
 
 const struct build_function_map *tplg_object_get_map(struct tplg_pre_processor *tplg_pp,
