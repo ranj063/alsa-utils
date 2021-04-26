@@ -656,6 +656,8 @@ const struct build_function_map object_build_map[] = {
 	{"Base", "data", "SectionData", &tplg_build_data_object,
 	 &tplg_create_data_config_template},
 	{"Base", "VendorToken", "SectionVendorTokens", &tplg_build_vendor_token_object, NULL},
+	{"Widget", "", "SectionWidget", &tplg_build_generic_object,
+	 &tplg_create_widget_config_template},
 };
 
 const struct build_function_map *tplg_object_get_map(struct tplg_pre_processor *tplg_pp,

@@ -88,6 +88,7 @@ int tplg_config_make_add(snd_config_t **config, const char *id, snd_config_type_
 
 /* config template functions */
 int tplg_create_data_config_template(snd_config_t **dtemplate);
+int tplg_create_widget_config_template(snd_config_t **wtemplate);
 
 char *tplg_snprintf(char *fmt, ...);
 #endif
