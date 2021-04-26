@@ -51,6 +51,8 @@ int tplg_build_data_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj
 			   snd_config_t *parent);
 int tplg_build_vendor_token_object(struct tplg_pre_processor *tplg_pp,
 			       snd_config_t *obj_cfg, snd_config_t *parent);
+int tplg_build_tlv_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent);
 int tplg_parent_update(struct tplg_pre_processor *tplg_pp, snd_config_t *parent,
 			  const char *section_name, const char *item_name);
 

@@ -655,6 +655,7 @@ const struct build_function_map object_build_map[] = {
 	{"Base", "manifest", "SectionManifest", &tplg_build_generic_object, NULL},
 	{"Base", "data", "SectionData", &tplg_build_data_object,
 	 &tplg_create_data_config_template},
+	{"Base", "tlv", "SectionTLV", &tplg_build_tlv_object, NULL},
 	{"Base", "VendorToken", "SectionVendorTokens", &tplg_build_vendor_token_object, NULL},
 	{"Widget", "", "SectionWidget", &tplg_build_generic_object,
 	 &tplg_create_widget_config_template},
