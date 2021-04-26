@@ -882,6 +882,8 @@ const struct build_function_map object_build_map[] = {
 	 &bytes_control_config},
 	{"Dai", "", "SectionBE", &tplg_build_generic_object, &be_dai_config},
 	{"PCM", "pcm", "SectionPCM", &tplg_build_generic_object, &pcm_config},
+	{"PCM", "pcm_caps", "SectionPCMCapabilities", &tplg_build_pcm_caps_object,
+	 &pcm_caps_config},
 };
 
 static const struct build_function_map *tplg_object_get_map(struct tplg_pre_processor *tplg_pp,
