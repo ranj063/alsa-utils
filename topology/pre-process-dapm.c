@@ -45,6 +45,15 @@ const struct config_template_items channel_config = {
 	.int_config_ids = {"reg", "shift"},
 };
 
+const struct config_template_items mixer_control_config = {
+	.int_config_ids = {"index", "max", "invert"},
+	.compound_config_ids = {"access"}
+};
+
+const struct config_template_items bytes_control_config = {
+	.int_config_ids = {"index", "base", "num_regs", "max", "mask"},
+};
+
 int tplg_build_base_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
 			   snd_config_t *parent, bool skip_name)
 {
@@ -110,4 +119,41 @@ int tplg_build_tlv_object(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_
 		return ret;
 
 	return tplg_parent_update(tplg_pp, parent, "tlv", name);
+}
+
+static int tplg_build_control(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent, char *type)
+{
+	snd_config_t *cfg, *obj;
+	const char *name;
+	int ret;
+
+	obj = tplg_object_get_instance_config(tplg_pp, obj_cfg);
+
+	/* get control name */
+	ret = snd_config_search(obj, "name", &cfg);
+	if (ret < 0)
+		return 0;
+
+	ret = snd_config_get_string(cfg, &name);
+	if (ret < 0)
+		return ret;
+
+	ret = tplg_build_object_from_template(tplg_pp, obj_cfg, &cfg, NULL, false);
+	if (ret < 0)
+		return ret;
+
+	return tplg_parent_update(tplg_pp, parent, type, name);
+}
+
+int tplg_build_mixer_control(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	return tplg_build_control(tplg_pp, obj_cfg, parent, "mixer");
+}
+
+int tplg_build_bytes_control(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
+			      snd_config_t *parent)
+{
+	return tplg_build_control(tplg_pp, obj_cfg, parent, "bytes");
 }
