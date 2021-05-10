@@ -175,7 +175,7 @@ void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp)
 	free(tplg_pp);
 }
 
-int init_pre_precessor(struct tplg_pre_processor **tplg_pp, snd_output_type_t type,
+int init_pre_processor(struct tplg_pre_processor **tplg_pp, snd_output_type_t type,
 		       const char *output_file)
 {
 	struct tplg_pre_processor *_tplg_pp;
