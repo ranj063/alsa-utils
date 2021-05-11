@@ -280,7 +280,6 @@ static int compile(const char *source_file, const char *output_file, int cflags)
 	/* pre-process before compiling */
 	if (pre_process_config) {
 		char *pconfig;
-		size_t size;
 
 		/* init pre-processor */
 		init_pre_processor(&tplg_pp, SND_OUTPUT_BUFFER, NULL);
