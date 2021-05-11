@@ -248,7 +248,7 @@ static int pre_process_conf(const char *source_file, const char *output_file)
 		return err;
 
 	/* init pre-processor */
-	err = init_pre_precessor(&tplg_pp, SND_OUTPUT_STDIO, output_file);
+	err = init_pre_processor(&tplg_pp, SND_OUTPUT_STDIO, output_file);
 	if (err < 0) {
 		fprintf(stderr, _("failed to init pre-processor for Topology2.0\n"));
 		free(config);
@@ -280,10 +280,9 @@ static int compile(const char *source_file, const char *output_file, int cflags)
 	/* pre-process before compiling */
 	if (pre_process_config) {
 		char *pconfig;
-		size_t size;
 
 		/* init pre-processor */
-		init_pre_precessor(&tplg_pp, SND_OUTPUT_BUFFER, NULL);
+		init_pre_processor(&tplg_pp, SND_OUTPUT_BUFFER, NULL);
 
 		/* pre-process conf file */
 		err = pre_process(tplg_pp, config, config_size);
