@@ -31,4 +31,7 @@ int pre_process(struct tplg_pre_processor *tplg_pp, char *config, size_t config_
 int init_pre_precessor(struct tplg_pre_processor **tplg_pp, snd_output_type_t type,
 		       const char *output_file);
 void free_pre_preprocessor(struct tplg_pre_processor *tplg_pp);
+
+int reverse_config(struct tplg_pre_processor *tplg_pp, char *config, size_t config_size);
+int condense_config(struct tplg_pre_processor *tplg_pp, char *config, size_t config_size);
 #endif

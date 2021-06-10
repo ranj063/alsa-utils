@@ -51,6 +51,7 @@ _("Usage: %s [OPTIONS]...\n"
 "-c, --compile=FILE      compile configuration file\n"
 "-p, --pre-process       pre-process Topology2.0 configuration file before compilation\n"
 "-P, --pre-process=FILE  pre-process Topology2.0 configuration file\n"
+"-r, --reverse=FILE	  convert Topology1.0 configuration file to 2.0 syntax\n"
 "-d, --decode=FILE       decode binary topology file\n"
 "-n, --normalize=FILE    normalize configuration file\n"
 "-u, --dump=FILE         dump (reparse) configuration file\n"
@@ -233,6 +234,104 @@ static int dump(const char *source_file, const char *output_file, int cflags, in
 	return err;
 }
 
+static int reverse_conf(const char *source_file, const char *output_file)
+{
+	struct tplg_pre_processor *tplg_pp;
+	FILE *fptr;
+	size_t config_size;
+	char *config;
+	int err;
+	char *include_str = "<include/common/vendor-token.conf>\n\
+<include/common/tokens.conf>\n\
+<include/components/volume.conf>\n\
+<include/components/host.conf>\n\
+<include/components/buffer.conf>\n\
+<include/components/muxdemux.conf>\n\
+<include/components/pipeline.conf>\n\
+<include/controls/mixer.conf>\n\
+<include/controls/bytes.conf>\n\
+<include/pipelines/volume-playback.conf>\n\
+<include/pipelines/volume-demux-playback.conf>\n\
+<include/pipelines/volume-capture.conf>\n\
+<include/pipelines/passthrough-capture.conf>\n\
+<include/pipelines/eq-iir-volume-capture.conf>\n\
+<include/components/dai.conf>\n\
+<include/components/eqiir.conf>\n\
+<include/components/virtual.conf>\n\
+<include/common/data.conf>\n\
+<include/common/pcm.conf>\n\
+<include/common/pcm_caps.conf>\n\
+<include/common/fe_dai.conf>\n\
+<include/dais/ssp.conf>\n\
+<include/dais/alh.conf>\n\
+<include/dais/hda.conf>\n\
+<include/dais/hw_config.conf>\n\
+<include/dais/dmic.conf>\n\
+<include/dais/pdm_config.conf>\n\
+<include/common/manifest.conf>\n\
+<include/common/pcm.conf>\n\
+<include/common/fe_dai.conf>\n\
+<include/common/pcm_caps.conf>\n\
+<include/common/route.conf>\n";
+
+	/* write includes into output file */
+	fptr = fopen(output_file,"w");
+	if (fptr == NULL) {
+		fprintf(stderr, "cannot open output file %s\n", output_file);
+		return -EINVAL;
+	}
+
+	fprintf(fptr, "%s", include_str);
+	fclose(fptr);
+
+	err = load(source_file, (void **)&config, &config_size);
+	if (err)
+		return err;
+
+	/* init pre-processor */
+	err = init_pre_precessor(&tplg_pp, SND_OUTPUT_STDIO, "temp.conf");
+	if (err < 0) {
+		fprintf(stderr, _("failed to init pre-processor for Topology2.0\n"));
+		free(config);
+		return err;
+	}
+
+	err = reverse_config(tplg_pp, config, config_size);
+
+	free_pre_preprocessor(tplg_pp);
+	free(config);
+
+	/* write includes into the file */
+	fptr = fopen("temp.conf","a");
+	if (fptr == NULL) {
+		fprintf(stderr, "cannot open output file %s\n", "temp.conf");
+		return -EINVAL;
+	}
+
+	fprintf(fptr, "%s", include_str);
+	fclose(fptr);
+
+	/* now condense the temp conf file */
+	err = load("temp.conf", (void **)&config, &config_size);
+	if (err)
+		return err;
+
+	/* init pre-processor */
+	err = init_pre_precessor(&tplg_pp, SND_OUTPUT_STDIO, output_file);
+	if (err < 0) {
+		fprintf(stderr, _("failed to init pre-processor for Topology2.0\n"));
+		free(config);
+		return err;
+	}
+
+	err = condense_config(tplg_pp, config, config_size);
+
+	free_pre_preprocessor(tplg_pp);
+	free(config);
+
+	return err;
+}
+
 /* Convert Topology2.0 conf to the existing conf syntax */
 static int pre_process_conf(const char *source_file, const char *output_file)
 {
@@ -353,13 +452,14 @@ static int decode(const char *source_file, const char *output_file,
 
 int main(int argc, char *argv[])
 {
-	static const char short_options[] = "hc:d:n:u:v:o:pP:sgxzV";
+	static const char short_options[] = "hc:d:n:u:v:o:pP:r:sgxzV";
 	static const struct option long_options[] = {
 		{"help", 0, NULL, 'h'},
 		{"verbose", 1, NULL, 'v'},
 		{"compile", 1, NULL, 'c'},
 		{"pre-process", 1, NULL, 'p'},
-		{"decode", 1, NULL, 'd'},
+		{"reverse", 1, NULL, 'r'},
+		{"decode", 1, NULL, 'd'	},
 		{"normalize", 1, NULL, 'n'},
 		{"dump", 1, NULL, 'u'},
 		{"output", 1, NULL, 'o'},
@@ -414,6 +514,10 @@ int main(int argc, char *argv[])
 			op = 'P';
 			source_file = optarg;
 			break;
+		case 'r':
+			op = 'r';
+			source_file = optarg;
+			break;
 		case 'p':
 			pre_process_config = true;
 			break;
@@ -455,6 +559,9 @@ int main(int argc, char *argv[])
 		break;
 	case 'P':
 		err = pre_process_conf(source_file, output_file);
+		break;
+	case 'r':
+		err = reverse_conf(source_file, output_file);
 		break;
 	default:
 		err = dump(source_file, output_file, cflags, sflags);
