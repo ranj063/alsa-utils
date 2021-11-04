@@ -222,7 +222,8 @@ err:
 	return ret;
 }
 
-int pre_process(struct tplg_pre_processor *tplg_pp, char *config, size_t config_size)
+int pre_process(struct tplg_pre_processor *tplg_pp, char *config, size_t config_size,
+		const char *pre_processor_defs)
 {
 	snd_input_t *in;
 	snd_config_t *top;
@@ -244,6 +245,13 @@ int pre_process(struct tplg_pre_processor *tplg_pp, char *config, size_t config_
 	err = snd_config_load(top, in);
 	if (err < 0) {
 		fprintf(stderr, "Unable not load configuration\n");
+		goto err;
+	}
+
+	/* expand pre-processor definitions */
+	err = snd_config_expand(top, top, pre_processor_defs, NULL, &top);
+	if (err < 0) {
+		fprintf(stderr, "Failed to expand pre-processor definitions in input config\n");
 		goto err;
 	}
 
