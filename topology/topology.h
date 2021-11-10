@@ -19,12 +19,21 @@
 
 #include <stdlib.h>
 
+#define TPLG_MAX_ARG_LENGTH 128
+
+struct tplg_pre_processor_args {
+	int count;
+	char (*names)[TPLG_MAX_ARG_LENGTH];
+	char (*values)[TPLG_MAX_ARG_LENGTH];
+};
+
 /* pre_processor */
 struct tplg_pre_processor {
 	snd_config_t *input_cfg;
 	snd_config_t *output_cfg;
 	snd_output_t *output;
 	snd_output_t *dbg_output;
+	struct tplg_pre_processor_args *args;
 };
 
 int pre_process(struct tplg_pre_processor *tplg_pp, char *config, size_t config_size,
