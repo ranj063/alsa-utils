@@ -85,6 +85,10 @@ int tplg_update_buffer_auto_attr(struct tplg_pre_processor *tplg_pp,
 				 snd_config_t *buffer_cfg, snd_config_t *parent);
 int tplg_add_object_data(struct tplg_pre_processor *tplg_pp, snd_config_t *obj_cfg,
 			 snd_config_t *top, const char *array_name);
+int tplg_update_audio_format_auto_attr(struct tplg_pre_processor *tplg_pp,
+				       snd_config_t *audio_fmt_cfg, snd_config_t *parent);
+int tplg_update_copier_auto_attr(struct tplg_pre_processor *tplg_pp, snd_config_t *copier_cfg,
+				 snd_config_t *parent);
 
 /* object helpers */
 int tplg_pre_process_objects(struct tplg_pre_processor *tplg_pp, snd_config_t *cfg,

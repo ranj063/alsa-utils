@@ -1014,6 +1014,10 @@ const struct build_function_map object_build_map[] = {
 	 &hwcfg_config},
 	{"Base", "fe_dai", "dai", &tplg_build_fe_dai_object, NULL, &fe_dai_config},
 	{"Base", "route", "SectionGraph", &tplg_build_dapm_route_object, NULL, NULL},
+	{"Base", "audio_format", "", NULL, tplg_update_audio_format_auto_attr,
+	 NULL},
+	{"Widget", "copier", "SectionWidget", &tplg_build_generic_object,
+	 tplg_update_copier_auto_attr, &widget_config},
 	{"Widget", "buffer", "SectionWidget", &tplg_build_generic_object,
 	 tplg_update_buffer_auto_attr, &widget_config},
 	{"Widget", "", "SectionWidget", &tplg_build_generic_object, NULL, &widget_config},
@@ -1540,7 +1544,10 @@ static int tplg_build_object(struct tplg_pre_processor *tplg_pp, snd_config_t *n
 	 */
 	map = tplg_object_get_map(tplg_pp, new_obj);
 	if (map) {
-		builder = map->builder;
+		if (map->builder)
+			builder = map->builder;
+		else
+			builder = &tplg_build_parent_data;
 
 		/* update automatic attribute for current object */
 		auto_attr_updater = map->auto_attr_updater;

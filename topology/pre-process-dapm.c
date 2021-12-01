@@ -532,3 +532,563 @@ int tplg_update_buffer_auto_attr(struct tplg_pre_processor *tplg_pp,
 
 	return err;
 }
+
+int tplg_update_audio_format_auto_attr(struct tplg_pre_processor *tplg_pp,
+				       snd_config_t *audio_fmt_cfg, snd_config_t *parent)
+{
+	enum channel_config {
+		/* one channel only. */
+		CHANNEL_CONFIG_MONO,
+		/* L & R. */
+		CHANNEL_CONFIG_STEREO,
+		/* L, R & LFE; PCM only. */
+		CHANNEL_CONFIG_2_POINT_1,
+		/* L, C & R; MP3 & AAC only. */
+		CHANNEL_CONFIG_3_POINT_0,
+		/* L, C, R & LFE; PCM only. */
+		CHANNEL_CONFIG_3_POINT_1,
+		/* L, R, Ls & Rs; PCM only. */
+		CHANNEL_CONFIG_QUATRO,
+		/* L, C, R & Cs; MP3 & AAC only. */
+		CHANNEL_CONFIG_4_POINT_0,
+		/* L, C, R, Ls & Rs. */
+		CHANNEL_CONFIG_5_POINT_0,
+		/* L, C, R, Ls, Rs & LFE. */
+		CHANNEL_CONFIG_5_POINT_1,
+		/* one channel replicated in two. */
+		CHANNEL_CONFIG_DUAL_MONO,
+		/* Stereo (L,R) in 4 slots, 1st stream: [ L, R, -, - ] */
+		CHANNEL_CONFIG_I2S_DUAL_STEREO_0,
+		/* Stereo (L,R) in 4 slots, 2nd stream: [ -, -, L, R ] */
+		CHANNEL_CONFIG_I2S_DUAL_STEREO_1,
+		/* L, C, R, Ls, Rs & LFE., LS, RS */
+		CHANNEL_CONFIG_7_POINT_1,
+		/* invalid */
+		CHANNEL_CONFIG_INVALID,
+	};
+	struct sample_type {
+		const char *type;
+		int value;
+	};
+	const struct sample_type sample_types[] = {
+		{"MSB_Integer", 0},
+		{"LSB_Integer", 1},
+		{"Signed_Integer", 2},
+		{"Unsigned_Integer", 3},
+		{"Float", 4},
+	};
+	struct channel_map_table {
+		int ch_count;
+		enum channel_config config;
+		unsigned int ch_map;
+	};
+	const struct channel_map_table ch_map_table[] = {
+	{ 1, CHANNEL_CONFIG_MONO, 0xFFFFFFF0 },
+	{ 2, CHANNEL_CONFIG_STEREO, 0xFFFFFF10 },
+	{ 3, CHANNEL_CONFIG_2_POINT_1, 0xFFFFF210 },
+	{ 4, CHANNEL_CONFIG_3_POINT_1, 0xFFFF3210 },
+	{ 5, CHANNEL_CONFIG_5_POINT_0, 0xFFF43210 },
+	{ 6, CHANNEL_CONFIG_5_POINT_1, 0xFF543210 },
+	{ 7, CHANNEL_CONFIG_INVALID, 0xFFFFFFFF },
+	{ 8, CHANNEL_CONFIG_7_POINT_1, 0x76543210 },
+	};
+	snd_config_iterator_t i, next;
+	snd_config_t *n, *parent_obj, *dir_cfg, *type_cfg;
+	const char *audio_fmt_id, *parent_name;
+	const char *copier_dir, *copier_type;
+	const char *in_sample_type, *out_sample_type;
+	int input_sample_type = 0, output_sample_type = 0;
+	long in_ch_count, out_ch_count;
+	long in_valid_bit_depth, out_valid_bit_depth;
+	long in_rate, out_rate;
+	long in_bit_depth, out_bit_depth;
+	int err, fmt_cfg, j;
+	int in_buffer_size, out_buffer_size, dma_buffer_size;
+
+	if (snd_config_get_id(audio_fmt_cfg, &audio_fmt_id) < 0)
+		return -EINVAL;
+
+	if (!parent) {
+		SNDERR("No parent for audio_fmt %s\n", audio_fmt_id);
+		return -EINVAL;
+	}
+
+	parent_obj = tplg_object_get_instance_config(tplg_pp, parent);
+
+	parent_name = tplg_object_get_name(tplg_pp, parent_obj);
+	if (!parent_name) {
+		err = snd_config_get_id(parent_obj, &parent_name);
+                if (err < 0) {
+                        SNDERR("Invalid parent name for %s\n", audio_fmt_id);
+                        return err;
+                }
+	}
+
+	printf("audio_fmt auto attr %s for copier %s\n", audio_fmt_id, parent_name);
+
+	/* get all required attribute values from the audio_format object */
+	snd_config_for_each(i, next, audio_fmt_cfg) {
+		const char *id;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		if (!strcmp(id, "in_channels")) {
+			if (snd_config_get_integer(n, &in_ch_count)) {
+				SNDERR("Invalid intput channel count in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "out_channels")) {
+			if (snd_config_get_integer(n, &out_ch_count)) {
+				SNDERR("Invalid output channel count in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "in_sample_type")) {
+			if (snd_config_get_string(n, &in_sample_type)) {
+				SNDERR("Invalid input sample type in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "out_sample_type")) {
+			if (snd_config_get_string(n, &out_sample_type)) {
+				SNDERR("Invalid output sample type in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "in_valid_bit_depth")) {
+			if (snd_config_get_integer(n, &in_valid_bit_depth)) {
+				SNDERR("Invalid input valid bit depth in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "out_valid_bit_depth")) {
+			if (snd_config_get_integer(n, &out_valid_bit_depth)) {
+				SNDERR("Invalid output valid bit depth in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "in_rate")) {
+			if (snd_config_get_integer(n, &in_rate)) {
+				SNDERR("Invalid output sampling rate in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "out_rate")) {
+			if (snd_config_get_integer(n, &out_rate)) {
+				SNDERR("Invalid output sampling rate in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "in_bit_depth")) {
+			if (snd_config_get_integer(n, &in_bit_depth)) {
+				SNDERR("Invalid output bit depth in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+
+		if (!strcmp(id, "out_bit_depth")) {
+			if (snd_config_get_integer(n, &out_bit_depth)) {
+				SNDERR("Invalid output bit depth in audio_format object %s\n",
+				       audio_fmt_id);
+				return -EINVAL;
+			}
+			continue;
+		}
+	}
+
+	/* add in_ch_cfg config to audio_format object config */
+	err = tplg_config_make_add(&n, "in_ch_cfg", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating in_ch_cfg config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	err = snd_config_set_integer(n, ch_map_table[in_ch_count - 1].config);
+	if (err < 0) {
+		SNDERR("Error setting in_ch_cfg config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+
+	/* add in_ch_map config to audio_format object config */
+	err = tplg_config_make_add(&n, "in_ch_map", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating in_ch_cfg config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	err = snd_config_set_integer(n, ch_map_table[in_ch_count - 1].ch_map);
+	if (err < 0) {
+		SNDERR("Error setting in_ch_map config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+
+	/* add in_fmt_cfg config to audio_format object config */
+	err = tplg_config_make_add(&n, "in_fmt_cfg", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating in_fmt_cfg config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	for (j = 0; j < ARRAY_SIZE(sample_types); j++) {
+		if (!strcmp(in_sample_type, sample_types[j].type))
+			input_sample_type = sample_types[j].value;
+
+		if (!strcmp(out_sample_type, sample_types[j].type))
+			output_sample_type = sample_types[j].value;
+
+	}
+
+	fmt_cfg = (in_ch_count & 0xFF);
+	fmt_cfg |= (in_valid_bit_depth & 0xFF) << 8;
+	fmt_cfg |= (input_sample_type & 0xFF) << 16;
+
+	err = snd_config_set_integer(n, fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error setting in_fmt_cfg size config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	printf("printing input audio format for copier %s\n", parent_name);
+	printf("ch_cfg %d, ch_map %#x, fmt_cfg %#x\n", ch_map_table[in_ch_count - 1].config,
+	       ch_map_table[in_ch_count - 1].ch_map, fmt_cfg);
+
+
+	/* add out_ch_cfg config to audio_format object config */
+	err = tplg_config_make_add(&n, "out_ch_cfg", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating out_ch_cfg config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	err = snd_config_set_integer(n, ch_map_table[out_ch_count - 1].config);
+	if (err < 0) {
+		SNDERR("Error setting out_ch_cfg config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	/* add in_ch_map config to audio_format object config */
+	err = tplg_config_make_add(&n, "out_ch_map", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating out_ch_cfg config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	err = snd_config_set_integer(n, ch_map_table[out_ch_count - 1].ch_map);
+	if (err < 0) {
+		SNDERR("Error setting out_ch_map config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+
+	/* add in_fmt_cfg config to audio_format object config */
+	err = tplg_config_make_add(&n, "out_fmt_cfg", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating out_fmt_cfg config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	fmt_cfg = (out_ch_count & 0xFF);
+	fmt_cfg |= (out_valid_bit_depth & 0xFF) << 8;
+	fmt_cfg |= (output_sample_type & 0xFF) << 16;
+
+	err = snd_config_set_integer(n, fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error setting in_fmt_cfg size config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	printf("printing output audio format for copier %s\n", parent_name);
+	printf("ch_cfg %d, ch_map %#x, fmt_cfg %#x\n", ch_map_table[out_ch_count - 1].config,
+	       ch_map_table[out_ch_count - 1].ch_map, fmt_cfg);
+
+	/* add input buffer size config to audio_format object config */
+	err = tplg_config_make_add(&n, "ibs", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating ibs config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	in_buffer_size = in_ch_count * (in_rate / 1000) * (in_bit_depth >> 3);
+
+	err = snd_config_set_integer(n, in_buffer_size);
+	if (err < 0) {
+		SNDERR("Error setting ibs size config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	printf("ibs %#x\n", in_buffer_size);
+
+	/* add output buffer size config to audio_format object config */
+	err = tplg_config_make_add(&n, "obs", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating obs config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	out_buffer_size = out_ch_count * (out_rate / 1000) * (out_bit_depth >> 3);
+
+	err = snd_config_set_integer(n, out_buffer_size);
+	if (err < 0) {
+		SNDERR("Error setting obs size config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	printf("obs %#x\n", out_buffer_size);
+
+	if (strncmp(parent_name, "copier", 6))
+		return err;
+
+	/* get copier direction */
+	err = snd_config_search(parent_obj, "direction", &dir_cfg);
+	if (err < 0)
+		return err;
+
+	err = snd_config_get_string(dir_cfg, &copier_dir);
+	if (err < 0)
+		return err;
+
+	/* get copier type */
+	err = snd_config_search(parent_obj, "type", &type_cfg);
+	if (err < 0)
+		return err;
+
+	err = snd_config_get_string(type_cfg, &copier_type);
+	if (err < 0)
+		return err;
+
+	/* nothing to do for module copiers */
+	if (!strcmp(copier_type, "module"))
+		return 0;
+
+	/* now update the parent copier's dma_buffer_size */	
+	err = tplg_config_make_add(&n, "dma_buffer_size", SND_CONFIG_TYPE_INTEGER, audio_fmt_cfg);
+	if (err < 0) {
+		SNDERR("Error creating dma_buffer_size config for %s\n", audio_fmt_id);
+		return err;
+	}
+
+	if (!strcmp(copier_type, "host")) {
+		if (!strcmp(copier_dir, "playback"))
+			dma_buffer_size = in_buffer_size * 2;
+		else
+			dma_buffer_size = out_buffer_size * 2;
+	} else {
+		if (!strcmp(copier_dir, "playback"))
+			dma_buffer_size = out_buffer_size * 2;
+		else
+			dma_buffer_size = in_buffer_size * 2;
+	}
+
+	printf("dma_buffer_size %#x\n", dma_buffer_size);
+
+	err = snd_config_set_integer(n, dma_buffer_size);
+	if (err < 0) {
+		SNDERR("Error setting dma_buffer_size config for %s\n", parent_name);
+		return err;
+	}
+
+	return err;
+}
+
+int tplg_update_copier_auto_attr(struct tplg_pre_processor *tplg_pp, snd_config_t *copier_cfg,
+				 snd_config_t *parent)
+{
+	enum sof_node_type {
+		//HD/A host output (-> DSP).
+		nHdaHostOutputClass = 0,
+		//HD/A host input (<- DSP).
+		nHdaHostInputClass = 1,
+		//HD/A host input/output (rsvd for future use).
+		nHdaHostInoutClass = 2,
+
+		//HD/A link output (DSP ->).
+		nHdaLinkOutputClass = 8,
+		//HD/A link input (DSP <-).
+		nHdaLinkInputClass = 9,
+		//HD/A link input/output (rsvd for future use).
+		nHdaLinkInoutClass = 10,
+
+		//DMIC link input (DSP <-).
+		nDmicLinkInputClass = 11,
+
+		//I2S link output (DSP ->).
+		nI2sLinkOutputClass = 12,
+		//I2S link input (DSP <-).
+		nI2sLinkInputClass = 13,
+
+		//ALH link output, legacy for SNDW (DSP ->).
+		nALHLinkOutputClass = 16,
+		//ALH link input, legacy for SNDW (DSP <-).
+		nALHLinkInputClass = 17,
+
+		//SNDW link output (DSP ->).
+		nAlhSndWireStreamLinkOutputClass = 16,
+		//SNDW link input (DSP <-).
+		nAlhSndWireStreamLinkInputClass = 17,
+
+		//UAOL link output (DSP ->).
+		nAlhUAOLStreamLinkOutputClass = 18,
+		//UAOL link input (DSP <-).
+		nAlhUAOLStreamLinkInputClass = 19,
+
+		//IPC output (DSP ->).
+		nIPCOutputClass = 20,
+		//IPC input (DSP <-).
+		nIPCInputClass = 21,
+
+		//I2S Multi gtw output (DSP ->).
+		nI2sMultiLinkOutputClass = 22,
+		//I2S Multi gtw input (DSP <-).
+		nI2sMultiLinkInputClass = 23,
+		//GPIO
+		nGpioClass = 24,
+		//SPI
+		nSpiOutputClass = 25,
+		nSpiInputClass = 26,
+	};
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *copier_id, *direction, *type;
+	long bss_size;
+	int err, is_pages;
+	int node_type = -EINVAL;
+
+	if (snd_config_get_id(copier_cfg, &copier_id) < 0)
+		return -EINVAL;
+
+	printf("copier auto attr %s\n", copier_id);
+
+	/* acquire attributes from buffer config */
+	snd_config_for_each(i, next, copier_cfg) {
+		const char *id;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		if (!strcmp(id, "bss_size")) {
+			if (snd_config_get_integer(n, &bss_size)) {
+				SNDERR("Invalid number of periods for copier %s\n", copier_id);
+				return -EINVAL;
+			}
+		}
+
+		if (!strcmp(id, "direction")) {
+			if (snd_config_get_string(n, &direction)) {
+				SNDERR("Invalid direction for copier %s\n", copier_id);
+				return -EINVAL;
+			}
+		}
+
+		if (!strcmp(id, "copier_type")) {
+			if (snd_config_get_string(n, &type)) {
+				SNDERR("Invalid direction for copier %s\n", copier_id);
+				return -EINVAL;
+			}
+		}
+	}
+
+	is_pages = ((bss_size + (1 << 12) - 1) & ~((1 << 12) - 1)) >> 12;
+
+	printf("mem_size for %s is %d\n", copier_id, is_pages);
+
+	/* add in_fmt_cfg config to audio_format object config */
+	err = tplg_config_make_add(&n, "is_pages", SND_CONFIG_TYPE_INTEGER, copier_cfg);
+	if (err < 0) {
+		SNDERR("Error creating mem_size config for %s\n", copier_id);
+		return err;
+	}
+
+	err = snd_config_set_integer(n, is_pages);
+	if (err < 0) {
+		SNDERR("Error setting mem_size size config for %s\n", copier_id);
+		return err;
+	}
+
+	/* add node_type config to audio_format object config */
+	err = tplg_config_make_add(&n, "node_type", SND_CONFIG_TYPE_INTEGER, copier_cfg);
+	if (err < 0) {
+		SNDERR("Error creating bode_type config for %s\n", copier_id);
+		return err;
+	}
+
+	if (!strcmp(type, "host")) {
+		if (!strcmp(direction, "playback"))
+			node_type = nHdaHostOutputClass;
+		else
+			node_type = nHdaHostInputClass;
+		goto set_node_type;
+	}
+
+	if (!strcmp(type, "HDA")) {
+		if (!strcmp(direction, "playback"))
+			node_type = nHdaLinkOutputClass;
+		else
+			node_type = nHdaLinkInputClass;
+		goto set_node_type;
+	}
+
+	if (!strcmp(type, "ALH")) {
+		if (!strcmp(direction, "playback"))
+			node_type = nALHLinkOutputClass;
+		else
+			node_type = nALHLinkInputClass;
+		goto set_node_type;
+	}
+
+	if (!strcmp(type, "SSP")) {
+		if (!strcmp(direction, "playback"))
+			node_type = nI2sLinkOutputClass;
+		else
+			node_type = nI2sLinkInputClass;
+		goto set_node_type;
+	}
+
+	if (!strcmp(type, "DMIC"))
+		node_type = nDmicLinkInputClass;
+
+set_node_type:
+	if (node_type < 0) {
+		SNDERR("Invalid node_type size config for %s\n", copier_id);
+		return node_type;
+	}
+
+	err = snd_config_set_integer(n, node_type);
+	if (err < 0) {
+		SNDERR("Error setting node_type size config for %s\n", copier_id);
+		return err;
+	}
+
+	return 0;
+}
