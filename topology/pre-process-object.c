@@ -1611,136 +1611,109 @@ pre_process_object_variables_expand_fcn(snd_config_t **dst, const char *str, voi
 	return ret;
 }
 
-static int tplg_subst_var_in_string(struct tplg_pre_processor *tplg_pp,
-				    snd_config_t *obj_local,
-				    snd_config_t **dst, const char *s)
+static int tplg_evaluate_config_string(struct tplg_pre_processor *tplg_pp,
+				    snd_config_t **dst, const char *s, const char *id)
 {
-	const char *p, *p1, *p2, *val;
-	snd_config_t *tmp = NULL;
-	int ret = 0, count = 0;
-	size_t nslen, nsidx;
-	char *ns;
+	char *str = strdup(s);
+	char *tmp;
+	char delimiter;
+	int offset = 0;
+	int ret;
 
-	p = s;
-	p1 = strstr(p, "${");
-	if (!p1) {
-		if (*s == '$') {
-			tplg_pp->current_obj_cfg = obj_local;
-			ret = snd_config_evaluate_string(dst, s,
+	if (!str)
+		return -ENOMEM;
+
+	/* evaluate the whole string the string is an arthmetic expression */
+	if ((s[0] == '$' && s[1] == '[')) {
+		ret = snd_config_evaluate_string(dst, s,
+						 pre_process_object_variables_expand_fcn, tplg_pp);
+		if (!ret)
+			snd_config_set_id(*dst, id);
+		goto out;
+	}
+
+	/* split the string and expand global definitions or object attribute values */
+	while ((tmp = strsep(&str, " .-"))) {
+		if (*tmp == '$') {
+			snd_config_t *tmp_config;
+
+			ret = snd_config_evaluate_string(&tmp_config, tmp,
 							 pre_process_object_variables_expand_fcn,
 							 tplg_pp);
 			if (ret < 0)
-				return ret;
-			return 1;
-		}
+				goto out;
 
-		return 0;
-	}
-	tplg_pp->current_obj_cfg = obj_local;
+			if (offset == 0) {
+				*dst = tmp_config;
+			} else {
+				snd_config_type_t type = snd_config_get_type(tmp_config);
+				const char *current_str;
+				char *temp;
 
-	ns = calloc(1, 256);
-	if (!ns)
-		return -ENOMEM;
-	nslen = 256;
-	nsidx = 0;
-	/* We are looking for a variable refs of form 'foo ${VARNAME} bar' */
-	do {
-		size_t vnlen, prelen;
-		char vname[128];
+				snd_config_get_string(*dst, &current_str);
 
-		p2 = strstr(p1, "}");
-		if (!p1) {
-			SNDERR("End mark of variable reference #%d not found in '%s'\n",
-			       count + 1, s);
-			ret = -EINVAL;
-			break;
-		}
+				/* concat the value based on type to the current string */
+				switch (type) {
+				case SND_CONFIG_TYPE_INTEGER:
+				{
+					long val;
 
-		/* Check that that variable name is not too long */
-		if (p2 - p1 > sizeof(vname)) {
-			SNDERR("Too long variable name for variable #%d in '%s'\n",
-			       count, s);
-			ret = -EINVAL;
-			break;
-		}
+					snd_config_get_integer(tmp_config, &val);
+					temp = tplg_snprintf("%s%c%ld", current_str, delimiter, val);
+					break;
+				}
+				case SND_CONFIG_TYPE_STRING:
+				{
+					const char *new_string;
 
-		/* variable name length */
-		vnlen = p2 - p1 - 2;
-		/* Make temporary variable reference */
-		vname[0] = '$';
-		strncpy(vname+1, p1 + 2, vnlen);
-		vname[vnlen + 1] = '\0';
+					snd_config_get_string(tmp_config, &new_string);
+					temp = tplg_snprintf("%s%c%s", current_str, delimiter,
+							     new_string);
+					break;
+				}
+				default:
+					return -EINVAL;
+				}
 
-		/* Throw away the variable definition from previous round */
-		if (tmp) {
-			snd_config_delete(tmp);
-			tmp = NULL;
-		}
-
-		/* expand config */
-		ret = snd_config_evaluate_string(&tmp, vname,
-						 pre_process_object_variables_expand_fcn,
-						 tplg_pp);
-		if (ret < 0)
-			break;
-
-		ret = snd_config_get_string(tmp, &val);
-		if (ret < 0)
-			break;
-
-		/* prefix length before variable substitution */
-		prelen = (size_t) (p1 - p);
-
-		/* Make sure there is enough memory for extracting the variable and prefix */
-		if (nslen <= nsidx + prelen + strlen(val) + 1) {
-			char *rns = realloc(ns, 2 * nslen);
-
-			if (!rns) {
-				ret = -ENOMEM;
-				break;
+				ret = snd_config_set_string(*dst, temp);
+				free(temp);
+				snd_config_delete(tmp_config);
+				if (ret < 0)
+					goto out;
 			}
-			nslen = 2 * nslen;
-			ns = rns;
+		} else {
+			/* if dst is NULL, create a new config and set its string value */
+			if (offset == 0) {
+				ret = snd_config_make(dst, id, SND_CONFIG_TYPE_STRING);
+				if (ret < 0)
+					goto out;
+				ret = snd_config_set_string(*dst, tmp);
+				if (ret < 0)
+					goto out;
+			} else {
+				const char *current_str;
+				char *temp;
+
+				/* concat the new string */
+				snd_config_get_string(*dst, &current_str);
+				temp = tplg_snprintf("%s%c%s", current_str, delimiter, tmp);
+				ret = snd_config_set_string(*dst, temp);
+				free(temp);
+				if (ret < 0)
+					goto out;
+			}
 		}
 
-		strncpy(&ns[nsidx], p, prelen); /* Copy prefix before variable reference */
-		nsidx += prelen;
-		strncat(&ns[nsidx], val, nslen - nsidx); /* Copy variable value */
-		nsidx += strlen(val);
-
-		p = p2 + 1;
-		count++;
-	} while ((p1 = strstr(p, "${")));
-
-	if (ret)
-		goto cleanup;
-
-	/* Make sure there is enough memory for the remainder */
-	if (nslen <= nsidx + strlen(p) + 1) {
-		char *rns = realloc(ns, 2 * nslen);
-
-		if (rns)
-			goto cleanup;
-
-		nslen = 2 * nslen;
-		ns = rns;
+		delimiter = s[offset + strlen(tmp)];
+		offset += strlen(tmp) + 1;
 	}
-	strncat(&ns[nsidx], p, nslen - nsidx); /* Copy remainder */
 
-	assert(tmp);
-	ret = snd_config_set_string(tmp, ns);
-	if (ret < 0)
-		goto cleanup;
+	free(str);
+	snd_config_set_id(*dst, id);
 
-	ret = snd_config_copy(dst, tmp);
-	if (ret < 0)
-		goto cleanup;
-
-	ret = count;
-cleanup:
-	if (tmp)
-		snd_config_delete(tmp);
-	free(ns);
+	return 0;
+out:
+	free(str);
 	return ret;
 }
 
@@ -1806,17 +1779,21 @@ static int tplg_build_object(struct tplg_pre_processor *tplg_pp, snd_config_t *n
 		if (snd_config_get_string(n, &s) < 0)
 			continue;
 
-		ret = tplg_subst_var_in_string(tplg_pp, obj_local, &new, s);
+		if (!strstr(s, "$"))
+			goto validate;
+
+		tplg_pp->current_obj_cfg = obj_local;
+
+		ret = tplg_evaluate_config_string(tplg_pp, &new, s, id);
 		if (ret < 0) {
-			SNDERR("Failed to evaluate attributes %s in %s\n", id, class_id);
+			SNDERR("Failed to evaluate attribute %s in %s\n", id, class_id);
 			return ret;
-		} else if (ret) {
-			snd_config_set_id(new, id);
-			ret = snd_config_merge(n, new, true);
-			if (ret < 0)
-				return ret;
 		}
 
+		ret = snd_config_merge(n, new, true);
+		if (ret < 0)
+			return ret;
+validate:
 		/* validate attribute value */
 		snd_config_get_id(n, &id);
 		attr_config_name = tplg_snprintf("DefineAttribute.%s", id);
