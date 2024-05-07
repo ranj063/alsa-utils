@@ -33,6 +33,7 @@
 #include "topology.h"
 #include "pre-processor.h"
 #include "pre-process-external.h"
+#define TPLG_DEBUG
 
 #define SND_TOPOLOGY_MAX_PLUGINS 32
 
@@ -921,6 +922,560 @@ static int pre_process_arrays(struct tplg_pre_processor *tplg_pp, snd_config_t *
 	return 0;
 }
 
+static char *pre_process_get_widget_name(struct tplg_pre_processor *tplg_pp, snd_config_t *widget,
+				       int pipeline_id, const char *dir)
+{
+	snd_config_iterator_t first;
+	snd_config_t *instance_cfg, *cfg;
+	const char *widget_type, *stream_name, *copier_type;
+	char *widget_name;
+	int ret;
+
+	ret = snd_config_get_id(widget, &widget_type);
+	if (ret < 0) {
+		fprintf(stderr, "Invalid widget type in pipeline ID: %d\n", pipeline_id);
+		return NULL;
+	}
+
+	/*
+	 * most widgets have the naming convention of widget_type.pipeline_id.instance_id,
+	 * for ex: gain.2.1
+	 */
+	if (strcmp(widget_type, "host-copier") && strcmp(widget_type, "dai-copier") &&
+	    strcmp(widget_type, "alh-copier")) {
+		const char *instance_id;
+
+		/* get widget instance_id */
+		first = snd_config_iterator_first(widget);
+		instance_cfg = snd_config_iterator_entry(first);
+		ret = snd_config_get_id(instance_cfg, &instance_id);
+		if (ret < 0) {
+			fprintf(stderr, "Invalid instance ID for widget %s in pipeline ID: %d\n",
+				widget_type, pipeline_id);
+			return NULL;
+		}
+		widget_name = tplg_snprintf("%s.%d.%s", widget_type, pipeline_id, instance_id);
+
+		return widget_name;
+	}
+
+	/* get host-copier name */
+	if (!strcmp(widget_type, "host-copier")) {
+		snd_config_t *pcm_id_cfg;
+		long pcm_id;
+
+		first = snd_config_iterator_first(widget);
+		instance_cfg = snd_config_iterator_entry(first);
+
+		/* get PCM ID */
+		ret = snd_config_search(instance_cfg, "pcm_id",  &pcm_id_cfg);
+		if (ret < 0) {
+			fprintf(stderr, "No pcm ID in host-copier in pipeline ID: %d\n", pipeline_id);
+			return NULL;
+		}
+
+		if (snd_config_get_integer(pcm_id_cfg, &pcm_id) < 0) {
+			fprintf(stderr, "Invalid pcm ID in host_copier in pipeline ID: %d\n",
+				pipeline_id);
+			return NULL;
+		}
+		widget_name = tplg_snprintf("%s.%ld.%s", widget_type, pcm_id, dir);
+		if (!widget_name)
+			return NULL;
+
+		return widget_name;
+	}
+
+	/* get dai-copier name */
+	first = snd_config_iterator_first(widget);
+	instance_cfg = snd_config_iterator_entry(first);
+
+	/* get copier_type */
+	ret = snd_config_search(instance_cfg, "copier_type",  &cfg);
+	if (ret < 0) {
+		fprintf(stderr, "No copier_type in dai-copier in pipeline ID: %d\n", pipeline_id);
+		return NULL;
+	}
+
+	if (snd_config_get_string(cfg, &copier_type) < 0) {
+		fprintf(stderr, "Invalid copier_type in dai-copier in pipeline ID: %d\n",
+			pipeline_id);
+		return NULL;
+	}
+
+	/* get stream_name */
+	ret = snd_config_search(instance_cfg, "stream_name",  &cfg);
+	if (ret < 0) {
+		fprintf(stderr, "No stream_name in dai-copier in pipeline ID: %d\n", pipeline_id);
+		return NULL;
+	}
+
+	if (snd_config_get_string(cfg, &stream_name) < 0) {
+		fprintf(stderr, "Invalid stream_name in dai-copier in pipeline ID: %d\n",
+			pipeline_id);
+		return NULL;
+	}
+
+	widget_name = tplg_snprintf("%s.%s.%s.%s", widget_type, copier_type, stream_name, dir);
+	if (!widget_name)
+		return NULL;
+
+	/* TODO: handle alh-copier */
+
+	return widget_name;
+}
+
+static int pre_process_pipeline_widgets(struct tplg_pre_processor *tplg_pp, snd_config_t *routes,
+					snd_config_t *widgets, int pipeline_id, const char *dir,
+					int *num_routes)
+{
+	snd_config_iterator_t i, next;
+	char *src = NULL;
+	char *sink;
+	int ret;
+
+	snd_config_for_each(i, next, widgets) {
+		snd_config_t *n, *route, *route_src, *route_sink;
+		char *widget_name;
+
+		n = snd_config_iterator_entry(i);
+		widget_name = pre_process_get_widget_name(tplg_pp, n, pipeline_id, dir);
+		if (!src) {
+			src = widget_name;
+			continue;
+		}
+		sink = widget_name;
+
+		/* Add a route */
+		ret = tplg_config_make_add(&route, tplg_snprintf("%d", *num_routes),
+					   SND_CONFIG_TYPE_COMPOUND, routes);
+		if (ret < 0)
+			return ret;
+		ret = tplg_config_make_add(&route_src, "source", SND_CONFIG_TYPE_STRING, route);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_config_set_string(route_src, src);
+		if (ret < 0)
+			return ret;
+
+		ret = tplg_config_make_add(&route_sink, "sink", SND_CONFIG_TYPE_STRING, route);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_config_set_string(route_sink, sink);
+		if (ret < 0)
+			return ret;
+
+		(*num_routes)++;
+
+		/* set current sink widget as the new source widget */
+		src = sink;
+	}
+
+	return 0;
+}
+
+static int pre_process_pipeline_routes(struct tplg_pre_processor *tplg_pp, snd_config_t *routes,
+					 snd_config_t *pipelines)
+{
+	snd_config_iterator_t i, next;
+	int num_routes = 0;
+	int ret;
+
+	snd_config_for_each(i, next, pipelines) {
+		snd_config_t *n, *widgets, *pipe_id, *dir_cfg;
+		const char *direction;
+		long id;
+
+		n = snd_config_iterator_entry(i);
+		ret = snd_config_search(n, "index",  &pipe_id);
+		if (ret < 0) {
+			fprintf(stderr, "No pipeline ID in pipeline\n");
+			return ret;
+		}
+
+		if (snd_config_get_integer(pipe_id, &id) < 0) {
+			fprintf(stderr, "Invalid pipeline ID for pipeline\n");
+			return -EINVAL;
+		}
+
+		ret = snd_config_search(n, "direction",  &dir_cfg);
+		if (ret < 0) {
+			fprintf(stderr, "No direction set for pipeline ID: %ld\n", id);
+			return ret;
+		}
+
+		if (snd_config_get_string(dir_cfg, &direction) < 0) {
+			fprintf(stderr, "Invalid direction for pipeline ID: %ld\n", id);
+			return -EINVAL;
+		}
+		ret = snd_config_search(n, "Object.Widget",  &widgets);
+		if (ret < 0)
+			continue;
+
+		ret = pre_process_pipeline_widgets(tplg_pp, routes, widgets, id, direction,
+						   &num_routes);
+		if (ret < 0) {
+			fprintf(stderr, "Failed to process routes in pipeline ID: %ld\n", id);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+static int pre_process_pipeline_fragment(struct tplg_pre_processor *tplg_pp, snd_config_t *top,
+					 snd_config_t *fragment, int *num_pipelines)
+{
+	snd_config_t *pipeline, *pipe_id;
+	snd_config_iterator_t i, next;
+	long frag_id;
+	int ret;
+
+	ret = snd_config_search(fragment, "pipeline_id",  &pipe_id);
+	if (ret < 0) {
+		fprintf(stderr, "No pipeline ID in pipeline fragment\n");
+		return ret;
+	}
+
+	if (snd_config_get_integer(pipe_id, &frag_id) < 0) {
+		fprintf(stderr, "Invalid pipeline ID in pipeline fragment\n");
+		return -EINVAL;
+	}
+
+	/* replace pipeline_id by index */
+	ret = snd_config_set_id(pipe_id, "index");
+	if (ret < 0) {
+		fprintf(stderr, "failed to set id for pipeline ID config\n");
+		return ret;
+	}
+
+	/* extend existing pipelines */
+	snd_config_for_each(i, next, top) {
+		snd_config_t *n;
+		long id;
+
+		n = snd_config_iterator_entry(i);
+		ret = snd_config_search(n, "index",  &pipe_id);
+		if (ret < 0) {
+			fprintf(stderr, "No pipeline ID in pipeline fragment\n");
+			return ret;
+		}
+
+		if (snd_config_get_integer(pipe_id, &id) < 0) {
+			fprintf(stderr, "Invalid pipeline ID in pipeline fragment\n");
+			return -EINVAL;
+		}
+		if (id != frag_id)
+			continue;
+
+		/* merge the new fragment to existing pipeline */
+		return snd_config_merge(n, fragment, false);
+	}
+
+	/* create new pipeline */
+	ret = tplg_config_make_add(&pipeline, tplg_snprintf("%d", *num_pipelines),
+				   SND_CONFIG_TYPE_COMPOUND, top);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to create pipeline with ID: %d\n", *num_pipelines);
+		return ret;
+	}
+
+	ret = snd_config_merge(pipeline, fragment, false);
+	if (ret < 0)
+		return ret;
+
+	(*num_pipelines)++;
+
+	return 0;
+}
+
+static char *pre_process_get_pipeline_source_or_sink(struct tplg_pre_processor *tplg_pp,
+						     snd_config_t *pipelines, int pipeline_id,
+						     bool get_source_widget)
+{
+	snd_config_iterator_t i, next;
+	int ret;
+
+	snd_config_for_each(i, next, pipelines) {
+		snd_config_t *n, *pipe_id, *widgets, *sink_widget, *dir_cfg;
+		snd_config_t *n2 = NULL;
+		snd_config_iterator_t end, i2, next2;
+		const char *direction;
+		long id;
+
+		n = snd_config_iterator_entry(i);
+		ret = snd_config_search(n, "index",  &pipe_id);
+		if (ret < 0) {
+			SNDERR("No pipeline ID in pipeline\n");
+			return NULL;
+		}
+
+		if (snd_config_get_integer(pipe_id, &id) < 0) {
+			SNDERR("Invalid pipeline ID in pipeline\n");
+			return NULL;
+		}
+
+		if (id != pipeline_id)
+			continue;
+
+		ret = snd_config_search(n, "direction",  &dir_cfg);
+		if (ret < 0) {
+			fprintf(stderr, "No direction set for pipeline ID: %ld\n", id);
+			return NULL;
+		}
+
+		if (snd_config_get_string(dir_cfg, &direction) < 0) {
+			fprintf(stderr, "Invalid direction for pipeline ID: %ld\n", id);
+			return NULL;
+		}
+
+		ret = snd_config_search(n, "Object.Widget",  &widgets);
+		if (ret < 0) {
+			SNDERR("no widgets in pipeline ID: %d\n", pipeline_id);
+			return NULL;
+		}
+
+		/* get source widget */
+		if (get_source_widget) {
+			end = snd_config_iterator_first(widgets);
+			sink_widget = snd_config_iterator_entry(end);
+
+			return pre_process_get_widget_name(tplg_pp, sink_widget, pipeline_id,
+							   direction);
+		}
+
+		/* get sink widget i.e the last widget in the list of widgets */
+		snd_config_for_each(i2, next2, widgets)
+			n2 = snd_config_iterator_entry(i2);
+		if (!n2)
+			return NULL;
+
+		return pre_process_get_widget_name(tplg_pp, n2, pipeline_id,
+						   direction);
+	}
+
+	return NULL;
+}
+
+static int pre_process_pipeline_connections(struct tplg_pre_processor *tplg_pp, snd_config_t *top,
+					    snd_config_t *pipelines)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *connections, *base_cfg;
+	int ret;
+
+	ret = snd_config_search(top, "ConnectPipelines", &connections);
+	if (ret < 0)
+		return 0;
+
+	if (snd_config_get_type(connections) != SND_CONFIG_TYPE_COMPOUND)
+		return 0;
+
+	snd_config_for_each(i, next, connections) {
+		snd_config_iterator_t first, second;
+		snd_config_t *n, *src_cfg, *sink_cfg, *routes, *route, *route_src, *route_sink;
+		long src_pipeline_id, sink_pipeline_id;
+		char *source_widget_name = NULL;
+		char *sink_widget_name = NULL;
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_is_array(n) <= 0) {
+			SNDERR("Pipeline connections must be an array\n");
+			return -EINVAL;
+		}
+
+		/* get source/sink pipeline ID's */
+		first = snd_config_iterator_first(n);
+		src_cfg = snd_config_iterator_entry(first);
+		second = snd_config_iterator_next(first);
+		sink_cfg = snd_config_iterator_entry(second);
+
+		ret = snd_config_get_integer(src_cfg, &src_pipeline_id);
+		if (ret < 0) {
+			SNDERR("Invalid source pipeline ID\n");
+			return ret;
+		}
+
+		ret = snd_config_get_integer(sink_cfg, &sink_pipeline_id);
+		if (ret < 0) {
+			SNDERR("Invalid sink pipeline ID\n");
+			return ret;
+		}
+
+		sink_widget_name = pre_process_get_pipeline_source_or_sink(tplg_pp, pipelines,
+									   sink_pipeline_id,
+									   true);
+		if (!sink_widget_name) {
+			SNDERR("No sink widget found to set up route\n");
+			return -EINVAL;
+		}
+		source_widget_name = pre_process_get_pipeline_source_or_sink(tplg_pp, pipelines,
+									     src_pipeline_id,
+									     false);
+		if (!source_widget_name) {
+			SNDERR("No source widget found to set up route\n");
+			return -EINVAL;
+		}
+
+		/* Add a route */
+		ret = snd_config_make(&routes, "route" , SND_CONFIG_TYPE_COMPOUND);
+		if (ret < 0)
+			return ret;
+
+		ret = tplg_config_make_add(&route, "0" , SND_CONFIG_TYPE_COMPOUND, routes);
+		if (ret < 0)
+			return ret;
+
+		ret = tplg_config_make_add(&route_src, "source", SND_CONFIG_TYPE_STRING, route);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_config_set_string(route_src, source_widget_name);
+		if (ret < 0)
+			return ret;
+
+		ret = tplg_config_make_add(&route_sink, "sink", SND_CONFIG_TYPE_STRING, route);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_config_set_string(route_sink, sink_widget_name);
+		if (ret < 0)
+			return ret;
+
+		ret = snd_config_search(top, "Object.Base.route",  &base_cfg);
+		ret = snd_config_merge(base_cfg, routes, false);
+		if (ret < 0)
+			return ret;
+	}
+
+	snd_config_delete(connections);
+
+	return 0;
+}
+
+static int pre_process_pipeline_fragments(struct tplg_pre_processor *tplg_pp, snd_config_t *top)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *fragments, *pipelines, *routes, *object_cfg;
+	snd_config_t *pipeline_cfg, *base_cfg, *route_cfg;
+	int num_pipelines = 0;
+	int ret;
+
+	ret = snd_config_search(top, "Pipelines", &fragments);
+	if (ret < 0)
+		return 0;
+
+	/* return if the fragments node is not an array */
+	if (snd_config_is_array(fragments) <= 0)
+		return 0;
+
+	ret = snd_config_make(&pipelines, "pipeline", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	/* process all fragments */
+	snd_config_for_each(i, next, fragments) {
+		snd_config_t *n;
+
+		n = snd_config_iterator_entry(i);
+
+		ret = pre_process_pipeline_fragment(tplg_pp, pipelines, n, &num_pipelines);
+		if (ret < 0)
+			return ret;
+	}
+
+	/* All pipelines created, now add the connections between the widgets */
+	ret = snd_config_make(&routes, "route", SND_CONFIG_TYPE_COMPOUND);
+	if (ret < 0)
+		return ret;
+
+	ret = pre_process_pipeline_routes(tplg_pp, routes, pipelines);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to add pipeline routes\n");
+		return ret;
+	}
+
+	/* Add the pipelines and routes to the top-level config */
+	ret = snd_config_search(top, "Object", &object_cfg);
+	if (ret < 0) {
+		ret = tplg_config_make_add(&object_cfg, "Object", SND_CONFIG_TYPE_COMPOUND, top);
+		if (ret < 0) {
+			SNDERR("Failed to create Object config\n");
+			return ret;
+		}
+	}
+
+	ret = snd_config_search(object_cfg, "Pipeline", &pipeline_cfg);
+	if (ret < 0) {
+		ret = tplg_config_make_add(&pipeline_cfg, "Pipeline", SND_CONFIG_TYPE_COMPOUND,
+					   object_cfg);
+		if (ret < 0) {
+			SNDERR("Failed to create Object.Pipeline config\n");
+			return ret;
+		}
+	}
+
+	ret = snd_config_search(object_cfg, "Base", &base_cfg);
+	if (ret < 0) {
+		ret = tplg_config_make_add(&base_cfg, "Base", SND_CONFIG_TYPE_COMPOUND,
+					   object_cfg);
+		if (ret < 0) {
+			SNDERR("Failed to create Object.Base config\n");
+			return ret;
+		}
+	}
+
+	ret = snd_config_search(base_cfg, "route", &route_cfg);
+	if (ret < 0) {
+		/* Add pipelines to top-level Object.Pipeline config */
+		ret = snd_config_add(base_cfg, routes);
+		if (ret < 0) {
+			SNDERR("Failed to add route to Object.Base config\n");
+			return ret;
+		}
+	} else {
+		ret = snd_config_merge(route_cfg, routes, false);
+		if (ret < 0) {
+			SNDERR("Failed to merge new route with top-level config routes\n");
+			return ret;
+		}
+	}
+
+	/* Add pipelines to top-level Object.Pipeline config */
+	ret = snd_config_add(pipeline_cfg, pipelines);
+	if (ret < 0)
+		return ret;
+
+	snd_config_delete(fragments);
+
+	ret = pre_process_pipeline_connections(tplg_pp, top, pipelines);
+	if (ret < 0) {
+		SNDERR("Failed to process top-level pipeline connections\n");
+		return ret;
+	}
+
+	return 0;
+}
+
+static int pre_process_pipelines(struct tplg_pre_processor *tplg_pp, snd_config_t *top)
+{
+	int ret;
+
+	if (snd_config_get_type(top) != SND_CONFIG_TYPE_COMPOUND)
+		return 0;
+
+	/* process pipelines at this node */
+	ret = pre_process_pipeline_fragments(tplg_pp, top);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to process pipelines\n");
+		return ret;
+	}
+
+	return 0;
+}
+
 #endif /* version < 1.2.6 */
 
 int pre_process(struct tplg_pre_processor *tplg_pp, char *config, size_t config_size,
@@ -978,6 +1533,13 @@ int pre_process(struct tplg_pre_processor *tplg_pp, char *config, size_t config_
 	err = pre_process_arrays(tplg_pp, tplg_pp->input_cfg);
 	if (err < 0) {
 		fprintf(stderr, "Failed to process object arrays in input config\n");
+		goto err;
+	}
+
+	/* Add pipelines */
+	err = pre_process_pipelines(tplg_pp, tplg_pp->input_cfg);
+	if (err < 0) {
+		fprintf(stderr, "Failed to process object pipelines in input config\n");
 		goto err;
 	}
 #endif
